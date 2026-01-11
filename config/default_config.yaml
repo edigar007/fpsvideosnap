@@ -1,0 +1,43 @@
+# FPS Video Snap Default Configuration
+
+# Global processing settings
+global:
+  output_dir: "output"
+  temp_dir: "temp"
+  history_dir: "history"
+  device: "cuda" # cpu or cuda
+  debug: false
+  log_level: "INFO"
+  # History management
+  keep_history_days: 30
+  max_history_files: 100
+
+# Video processing settings
+video:
+  ffmpeg_path: "ffmpeg"
+  hwaccel: "cuda"
+  encoder: "h264_nvenc"
+  bitrate: "20M"
+  fps: 60
+  
+# AI Detection settings
+detection:
+  model_path: "models/yolov8n.pt"
+  confidence_threshold: 0.5
+  batch_size: 16
+  # Time window for kill detection (seconds)
+  time_window: 2.0
+  # Default ROI (Region of Interest) for UI elements [x, y, w, h] as percentages (0.0 - 1.0)
+  ui_roi: [0.0, 0.0, 1.0, 1.0]
+
+# Highilght generation settings
+highlights:
+  pre_kill_time: 3.0 # Seconds before kill
+  post_kill_time: 1.0 # Seconds after kill
+  multikill_threshold: 10.0 # Max seconds between kills in a sequence
+  transition_type: "random" # "fade", "wipeleft", "wiperight", "slideup", "slidedown", "circlecrop", "random", or "none"
+  transition_duration: 0.5 # Seconds
+  music_enabled: true
+  music_path: "assets/music/default_hype.mp3"
+  game_volume: 0.5
+  music_volume: 0.5

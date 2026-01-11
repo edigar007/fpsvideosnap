@@ -1,0 +1,24 @@
+# Battlefield 6 Game-Specific Configuration
+
+game_name: "Battlefield 6"
+
+detection:
+  # BF6 Killfeed is usually bottom center or top right. 
+  # Let's define a typical killfeed ROI in the top right for now.
+  # Values are [x, y, w, h] as decimals.
+  killfeed_roi: [0.75, 0.05, 0.2, 0.2]
+  
+  # UI colors for detection (HSV ranges)
+  # Example: Blue for player kills, Red for enemy kills
+  colors:
+    player_kill_blue:
+      lower: [100, 150, 150]
+      upper: [140, 255, 255]
+    enemy_kill_red:
+      lower: [0, 150, 150]
+      upper: [10, 255, 255]
+
+highlights:
+  # BF6 actions are fast-paced, maybe longer pre-kill time
+  pre_kill_time: 5.0
+  post_kill_time: 1.5
