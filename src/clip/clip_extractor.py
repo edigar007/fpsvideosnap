@@ -88,7 +88,12 @@ class ClipExtractor:
                 logger.info(f"Extracting clip {idx+1}: {filename} ({start:.2f}s -> {clip['end']:.2f}s)")
                 
                 try:
-                    self.cutter.cut_segment(video_path, output_path, start, duration)
+                    # TASK-009: Prefer stream copy if transitions are disabled to speed up processing
+                    # and avoid double re-encoding quality loss
+                    transition_type = self.highlights_cfg.get("transition_type", "random")
+                    use_copy = (transition_type == "none")
+                    
+                    self.cutter.cut_segment(video_path, output_path, start, duration, use_stream_copy=use_copy)
                     
                     # TASK-001: Ensure deterministic metadata fields
                     clip["path"] = output_path

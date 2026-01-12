@@ -33,9 +33,9 @@ This plan delivers a deterministic fix set for FPS Video Snap to unblock the hig
 
 | Task | Description | Completed | Date |
 |------|-------------|-----------|------|
-| TASK-001 | Update `src/clip/clip_extractor.py` to write `path`, `start_ms`, `end_ms`, and canonical filenames for every clip; ensure metadata JSON mirrors the same structure. | | |
-| TASK-002 | Modify `src/pipeline/pipeline.py` join stage to read `clip['path']` (falling back to `output_path` if needed) and validate file existence before invoking `VideoJoiner`. | | |
-| TASK-003 | Extend `tests/test_pipeline.py` and `tests/test_clip.py` to assert presence of the new metadata fields and verify the pipeline consumes them without mocks stripping keys. | | |
+| TASK-001 | Update `src/clip/clip_extractor.py` to write `path`, `start_ms`, `end_ms`, and canonical filenames for every clip; ensure metadata JSON mirrors the same structure. | ✅ | 2026-01-12 |
+| TASK-002 | Modify `src/pipeline/pipeline.py` join stage to read `clip['path']` (falling back to `output_path` if needed) and validate file existence before invoking `VideoJoiner`. | ✅ | 2026-01-12 |
+| TASK-003 | Extend `tests/test_pipeline.py` and `tests/test_clip.py` to assert presence of the new metadata fields and verify the pipeline consumes them without mocks stripping keys. | ✅ | 2026-01-12 |
 
 ### Implementation Phase 2
 
