@@ -4,7 +4,8 @@ detection:
     enabled: true
     keywords:
     - 击杀
-    similarity_threshold: 0.65
+    - 爆头
+    similarity_threshold: 0.9
   templates:
     '111111':
       roi:
@@ -34,16 +35,6 @@ detection:
       - 180
       - 105
       - 123
-      tolerance: 20
-    aaaaaa:
-      hsv_lower:
-      - 125
-      - 102
-      - 185
-      hsv_upper:
-      - 165
-      - 182
-      - 255
       tolerance: 20
 highlights:
   pre_kill_time: 5.0

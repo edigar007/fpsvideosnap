@@ -105,11 +105,17 @@ class OCRDetector:
         try:
             detections = []
             if self.engine_type == 'paddle':
-                result = self.ocr_engine.ocr(target_img, cls=True)
-                if result and result[0]:
-                    for line in result[0]:
-                        bbox = line[0]
-                        text, confidence = line[1]
+                # PaddleOCR 3.x predict 返回列表，第一个元素包含所有结果
+                result = self.ocr_engine.predict(target_img)
+                if result and len(result) > 0:
+                    page_result = result[0]
+                    rec_texts = page_result.get('rec_texts', [])
+                    rec_scores = page_result.get('rec_scores', [])
+                    rec_polys = page_result.get('rec_polys', [])
+                    
+                    for i, text in enumerate(rec_texts):
+                        confidence = rec_scores[i] if i < len(rec_scores) else 1.0
+                        bbox = rec_polys[i] if i < len(rec_polys) else [[0, 0], [0, 0], [0, 0], [0, 0]]
                         detections.append({
                             'text': text,
                             'confidence': float(confidence),
