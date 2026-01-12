@@ -1,218 +1,266 @@
 /**
- * Main application logic for Config Assistant
+ * Main application coordinator for Config Assistant v2.0
  */
-
 document.addEventListener('DOMContentLoaded', () => {
     // UI Elements
-    const dropZone = document.getElementById('drop-zone');
-    const fileInput = document.getElementById('file-input');
-    const canvasContainer = document.getElementById('canvas-container');
     const gameSelector = document.getElementById('game-selector');
-    const displayGameName = document.getElementById('display-game-name');
+    const addGameBtn = document.getElementById('add-game-btn');
+    const addGameModal = document.getElementById('add-game-modal');
+    const confirmAddGameBtn = document.getElementById('confirm-add-game');
+    const newGameNameInput = document.getElementById('new-game-name');
+    const closeModalBtns = document.querySelectorAll('.close-modal');
+    
+    const fileInput = document.getElementById('file-input');
+    const uploadBtn = document.getElementById('upload-btn');
+    const dropZone = document.getElementById('drop-zone');
+    
     const statusMessage = document.getElementById('status-message');
     const loadingOverlay = document.getElementById('loading-overlay');
-    const yamlPreview = document.getElementById('yaml-preview');
-    
-    // Tools
-    const toolRoiBtn = document.getElementById('tool-roi');
-    const toolColorBtn = document.getElementById('tool-color');
-    
-    const roiList = document.getElementById('roi-list');
-    const colorList = document.getElementById('color-list');
-    const clearRoiBtn = document.getElementById('clear-roi');
-    const clearColorsBtn = document.getElementById('clear-colors');
+    const downloadConfigBtn = document.getElementById('download-config-btn');
 
-    // State
+    // App State
     const appState = {
-        imagePath: null,
-        currentFile: null,
         currentGame: '',
-        activeTool: 'roi', // 'roi' or 'color'
-        rois: [], // list of {name, x, y, h, w}
-        colors: [], // list of hsv objects
-        imageData: null,
-        showColorHighlight: true,
-        yamlOutput: ''
+        config: {
+            game: '',
+            detection: {
+                killfeed_roi: null,
+                ocr: { enabled: true, keywords: [], threshold: 0.8 },
+                templates: {},
+                colors: {}
+            }
+        },
+        gamesList: [],
+        currentImagePath: ''
     };
 
-    // History
-    const history = new HistoryManager();
-
-    const pushHistory = () => {
-        history.push({
-            rois: appState.rois,
-            colors: appState.colors
-        });
-    };
-
-    // Initialize Canvas
-    const imgCanvas = new ImageCanvas('main-canvas', 'canvas-container');
-    const roiHandler = new ROIHandler(document.getElementById('main-canvas'), imgCanvas, () => {
-        appState.rois = roiHandler.rois;
-        updateRoiUI();
-        throttledUpdateYaml();
-        pushHistory();
-    });
-
-    const colorPicker = new ColorPickerHandler(
-        document.getElementById('main-canvas'), 
-        imgCanvas, 
-        appState, 
-        () => {
-            updateColorUI();
-            throttledUpdateYaml();
-            pushHistory();
-        }
-    );
-
-    const showStatus = (msg, type = 'info') => {
-        statusMessage.textContent = msg;
-        statusMessage.className = 'status-msg ' + type;
-        console.log(`[${type}] ${msg}`);
-    };
-
-    const templateHandler = new TemplateHandler(appState, roiHandler, showStatus);
-
-    imgCanvas.onDraw = (ctx) => {
-        roiHandler.render();
-        colorPicker.render(ctx);
-    };
-
-    // --- Init ---
-    fetchGames();
-    updateYamlPreview();
-    pushHistory(); // Push initial state
-
-    // --- Event Listeners ---
-    
-    // File Selection
-    dropZone.addEventListener('click', () => fileInput.click());
-    
-    dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.classList.add('drag-over');
-    });
-
-    dropZone.addEventListener('dragleave', () => {
-        dropZone.classList.remove('drag-over');
-    });
-
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('drag-over');
-        if (e.dataTransfer.files.length > 0) {
-            handleFileSelection(e.dataTransfer.files[0]);
-        }
-    });
-
-    fileInput.addEventListener('change', (e) => {
-        if (e.target.files.length > 0) {
-            handleFileSelection(e.target.files[0]);
-        }
-    });
-
-    const downloadBtn = document.getElementById('download-config');
-    const copyYamlBtn = document.getElementById('copy-yaml');
-    const saveConfigBtn = document.getElementById('save-config');
-
-    // Tool Selection
-    toolRoiBtn.addEventListener('click', () => setActiveTool('roi'));
-    toolColorBtn.addEventListener('click', () => setActiveTool('color'));
-
-    // Game Selection
-    gameSelector.addEventListener('change', (e) => {
-        appState.currentGame = e.target.value;
-        displayGameName.textContent = appState.currentGame || '-';
-        templateHandler.setGameName(appState.currentGame);
-        if (appState.currentGame) {
-            loadGameConfig(appState.currentGame);
-        }
-    });
-
-    // Action Buttons
-    copyYamlBtn.addEventListener('click', () => {
-        if (!appState.yamlOutput) return;
-        navigator.clipboard.writeText(appState.yamlOutput).then(() => {
-            showStatus('已复制到剪贴板', 'success');
-        });
-    });
-
-    downloadBtn.addEventListener('click', () => {
-        if (!appState.yamlOutput) return;
-        const blob = new Blob([appState.yamlOutput], { type: 'text/yaml' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${appState.currentGame || 'config'}.yaml`;
-        a.click();
-        URL.revokeObjectURL(url);
-    });
-
-    saveConfigBtn.addEventListener('click', async () => {
-        if (!appState.yamlOutput || !appState.currentGame) {
-            showStatus('没有可保存的配置或游戏名称', 'error');
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/save-config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    game_name: appState.currentGame,
-                    yaml: appState.yamlOutput
-                })
-            });
-            const data = await response.json();
-            if (data.error) throw new Error(data.error);
-            showStatus(`配置已保存到 ${data.path}`, 'success');
-        } catch (error) {
-            showStatus('保存失败: ' + error.message, 'error');
-        }
-    });
-
-    // Clear Buttons
-    clearRoiBtn.addEventListener('click', () => {
-        roiHandler.clearAll();
-    });
-
-    clearColorsBtn.addEventListener('click', () => {
-        appState.colors = [];
-        updateColorUI();
-        updateYamlPreview();
-    });
-
-    // --- Actions ---
-
-    async function fetchGames() {
-        try {
-            const response = await fetch('/api/games');
-            const games = await response.json();
-            
-            gameSelector.innerHTML = '<option value="">选择游戏...</option>';
-            games.forEach(game => {
-                const option = document.createElement('option');
-                option.value = game;
-                option.textContent = game;
-                gameSelector.appendChild(option);
-            });
-        } catch (error) {
-            console.error('Failed to fetch games:', error);
-            showStatus('获取游戏列表失败', 'error');
+    /**
+     * Initialize Application
+     */
+    async function init() {
+        console.log('[App] Initializing v2.0...');
+        await loadGamesList();
+        setupEventListeners();
+        
+        // Load default config if available
+        if (appState.gamesList.length > 0) {
+            gameSelector.value = appState.gamesList[0];
+            await loadGameConfig(appState.gamesList[0]);
         }
     }
 
-    async function handleFileSelection(file) {
+    /**
+     * Load list of configured games from backend
+     */
+    async function loadGamesList() {
+        try {
+            const response = await fetch('/api/game/list');
+            const data = await response.json();
+            appState.gamesList = data.games || [];
+            
+            // Populate dropdown
+            gameSelector.innerHTML = appState.gamesList
+                .map(g => `<option value="${g}">${g}</option>`)
+                .join('');
+                
+            if (appState.gamesList.length === 0) {
+                gameSelector.innerHTML = '<option value="">请新增游戏...</option>';
+            }
+        } catch (err) {
+            console.error('Failed to load games list:', err);
+            showStatus('加载游戏列表失败', 'error');
+        }
+    }
+
+    /**
+     * Load specific game configuration
+     */
+    async function loadGameConfig(gameId) {
+        if (!gameId) return;
+        
+        showLoading(`正在加载 ${gameId} 的配置...`);
+        try {
+            const response = await fetch(`/api/config/${gameId}`);
+            const config = await response.json();
+            
+            appState.currentGame = gameId;
+            appState.config = config;
+            
+            // Sync with other modules
+            if (window.configPreview) {
+                window.configPreview.update(config);
+            }
+            
+            if (window.canvasState && config.detection && config.detection.killfeed_roi) {
+                window.canvasState.roi = config.detection.killfeed_roi;
+                window.canvasState.render();
+                
+                if (window.roiTab) {
+                    window.roiTab.setROI(config.detection.killfeed_roi);
+                }
+            }
+
+            if (window.ocrTab && config.detection && config.detection.ocr) {
+                window.ocrTab.setConfig(config.detection.ocr);
+            }
+
+            if (window.templateTab && config.detection && config.detection.templates) {
+                window.templateTab.setTemplates(config.detection.templates);
+            }
+
+            if (window.colorTab && config.detection && config.detection.colors) {
+                window.colorTab.setColors(config.detection.colors);
+            }
+            
+            showStatus(`${gameId} 配置已加载`, 'success');
+        } catch (err) {
+            console.error('Failed to load config:', err);
+            showStatus('加载配置失败', 'error');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    /**
+     * Event Listeners Setup
+     */
+    function setupEventListeners() {
+        // Game Selection
+        gameSelector.addEventListener('change', (e) => loadGameConfig(e.target.value));
+        
+        // Add Game Modal
+        addGameBtn.addEventListener('click', () => addGameModal.classList.add('active'));
+        closeModalBtns.forEach(btn => btn.addEventListener('click', () => addGameModal.classList.remove('active')));
+        
+        confirmAddGameBtn.addEventListener('click', async () => {
+            const name = newGameNameInput.value.trim();
+            if (!name) return alert('请输入游戏名称');
+            
+            try {
+                const response = await fetch('/api/game/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name })
+                });
+                
+                if (response.ok) {
+                    await loadGamesList();
+                    gameSelector.value = name;
+                    await loadGameConfig(name);
+                    addGameModal.classList.remove('active');
+                } else {
+                    alert('创建失败，可能名称已存在');
+                }
+            } catch (err) {
+                console.error(err);
+                alert('网络错误');
+            }
+        });
+
+        // Image Upload
+        uploadBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', handleFileSelect);
+        
+        // Drag and Drop - 扩大拖拽区域到整个左侧面板
+        const canvasPanel = document.querySelector('.canvas-panel');
+        
+        canvasPanel.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('dragover');
+        });
+        
+        canvasPanel.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // 只在真正离开面板时移除样式
+            if (e.target === canvasPanel) {
+                dropZone.classList.remove('dragover');
+            }
+        });
+        
+        canvasPanel.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+        
+        // 保留原有的 dropZone 事件，以防万一
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+        
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        // Export/Download
+        downloadConfigBtn.addEventListener('click', () => {
+            if (!appState.currentGame) return;
+            window.location.href = `/api/config/${appState.currentGame}/export`;
+        });
+
+        // Global Keyboard Shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Avoid shortcuts when typing in inputs/textareas
+            if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+                if (e.key === 'Escape') {
+                    document.activeElement.blur();
+                }
+                return;
+            }
+
+            const key = e.key.toLowerCase();
+            
+            // Tab switching: 1-4
+            if (['1', '2', '3', '4'].includes(key)) {
+                const tabs = ['roi', 'ocr', 'templates', 'colors'];
+                if (window.tabManager) {
+                    window.tabManager.switchTab(tabs[parseInt(key) - 1]);
+                }
+            }
+            
+            // Save: S
+            if (key === 's') {
+                e.preventDefault();
+                downloadConfigBtn.click();
+            }
+            
+            // Exit/Cancel: Escape
+            if (e.key === 'Escape') {
+                if (addGameModal.classList.contains('active')) {
+                    addGameModal.classList.remove('active');
+                } else if (window.canvasState) {
+                    window.canvasState.resetSelection();
+                }
+            }
+        });
+    }
+
+    function handleFileSelect(e) {
+        if (e.target.files.length > 0) {
+            handleFile(e.target.files[0]);
+        }
+    }
+
+    async function handleFile(file) {
         if (!file.type.startsWith('image/')) {
-            showStatus('请上传图片文件', 'error');
-            return;
+            return showStatus('请上传图片文件', 'error');
         }
 
-        showLoading(true);
-        appState.currentFile = file;
-
+        showLoading('正在上传图片...');
+        
         try {
-            // 1. Upload to server
             const formData = new FormData();
             formData.append('file', file);
             
@@ -220,283 +268,70 @@ document.addEventListener('DOMContentLoaded', () => {
                 method: 'POST',
                 body: formData
             });
-            
             const data = await response.json();
+            
             if (data.error) throw new Error(data.error);
             
-            appState.imagePath = data.path;
-            appState.imageData = data;
-
-            // 2. Load into canvas
-            await imgCanvas.loadImage(file);
+            // Store absolute path for backend tools (OCR, Template)
+            appState.currentImagePath = data.path;
             
-            // 3. Update UI
-            dropZone.style.display = 'none';
-            canvasContainer.style.display = 'block';
-            
-            // 4. Resize canvas after container is visible
-            imgCanvas.resize();
-            
-            showStatus('图片加载成功');
-            
-        } catch (error) {
-            console.error('Upload failed:', error);
-            showStatus('文件处理失败: ' + error.message, 'error');
-        } finally {
-            showLoading(false);
-        }
-    }
-
-    function setActiveTool(tool) {
-        appState.activeTool = tool;
-        toolRoiBtn.classList.toggle('active', tool === 'roi');
-        toolColorBtn.classList.toggle('active', tool === 'color');
-        
-        roiHandler.enabled = (tool === 'roi');
-        colorPicker.setEnabled(tool === 'color');
-        
-        showStatus(`当前工具: ${tool === 'roi' ? 'ROI 选择' : '颜色拾取'}`);
-    }
-
-    async function loadGameConfig(gameName) {
-        try {
-            showStatus(`正在加载 ${gameName} 的配置...`);
-            const response = await fetch(`/api/load-config/${gameName}`);
-            const config = await response.json();
-            if (config.error) throw new Error(config.error);
-            
-            // Populating ROIs
-            roiHandler.rois = [];
-            if (config.detection) {
-                for (const [key, value] of Object.entries(config.detection)) {
-                    if (key.endsWith('_roi') && Array.isArray(value) && value.length === 4) {
-                        const name = key.replace('_roi', '');
-                        roiHandler.rois.push({
-                            name: name,
-                            x: value[0], y: value[1], w: value[2], h: value[3]
-                        });
+            // Preview locally
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    if (window.canvasState) {
+                        window.canvasState.setImage(img);
+                        dropZone.style.display = 'none';
                     }
-                }
-            }
-            appState.rois = roiHandler.rois;
-            updateRoiUI();
-
-            // Populating Colors
-            appState.colors = [];
-            if (config.detection && config.detection.colors) {
-                for (const [name, range] of Object.entries(config.detection.colors)) {
-                    appState.colors.push({
-                        name: name,
-                        lower: range.lower,
-                        upper: range.upper,
-                        rgb: [128, 128, 128] // Placeholder RGB if not available
-                    });
-                }
-            }
-            updateColorUI();
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
             
-            updateYamlPreview();
-            showStatus(`${gameName} 配置加载成功`, 'success');
-        } catch (error) {
-            console.warn('Could not load existing config:', error);
-            showStatus('加载现有配置失败', 'error');
+            showStatus('图片加载成功', 'success');
+        } catch (err) {
+            console.error('Upload failed:', err);
+            showStatus('图片上传失败', 'error');
+        } finally {
+            hideLoading();
         }
     }
 
-    function updateRoiUI() {
-        if (appState.rois.length === 0) {
-            roiList.innerHTML = '<div class="empty-msg">暂无 ROI</div>';
-            return;
-        }
-        
-        roiList.innerHTML = appState.rois.map((roi, i) => `
-            <div class="data-item ${roiHandler.selectedIndex === i ? 'selected' : ''}" onclick="window.selectROI(${i})">
-                <div class="roi-info">
-                    <input type="text" class="roi-name-edit" value="${roi.name}" 
-                        onchange="window.renameROI(${i}, this.value)" 
-                        onclick="event.stopPropagation()">
-                    <span class="code">[${roi.x.toFixed(3)}, ${roi.y.toFixed(3)}, ${roi.w.toFixed(3)}, ${roi.h.toFixed(3)}]</span>
-                </div>
-                <button class="remove-btn" onclick="window.removeROI(${i}, event)">&times;</button>
-            </div>
-        `).join('');
+    /**
+     * UI Utils
+     */
+    function showStatus(msg, type = 'info') {
+        statusMessage.textContent = msg;
+        statusMessage.className = `status-badge ${type}`;
+        setTimeout(() => {
+            if (statusMessage.textContent === msg) {
+                statusMessage.textContent = '准备就绪';
+                statusMessage.className = 'status-badge';
+            }
+        }, 3000);
     }
-
-    // Expose functions to window for onclick handlers
-    window.selectROI = (index) => {
-        roiHandler.selectedIndex = index;
-        imgCanvas.draw();
-        updateRoiUI();
+    
+    // Expose globally
+    window.showStatus = showStatus;
+    window.app = {
+        showStatus,
+        showLoading,
+        hideLoading,
+        get config() { return appState.config; },
+        set config(val) { appState.config = val; },
+        get imagePath() { return appState.currentImagePath; }
     };
 
-    window.renameROI = (index, newName) => {
-        if (roiHandler.rois[index]) {
-            roiHandler.rois[index].name = newName;
-            updateRoiUI();
-            imgCanvas.draw();
-            updateYamlPreview();
-        }
-    };
-
-    window.removeROI = (index, event) => {
-        if (event) event.stopPropagation();
-        roiHandler.rois.splice(index, 1);
-        if (roiHandler.selectedIndex === index) roiHandler.selectedIndex = -1;
-        else if (roiHandler.selectedIndex > index) roiHandler.selectedIndex--;
-        
-        roiHandler.onUpdate();
-        imgCanvas.draw();
-    };
-
-    function updateColorUI() {
-        if (appState.colors.length === 0) {
-            colorList.innerHTML = '<div class="empty-msg">暂无颜色</div>';
-            return;
-        }
-
-        colorList.innerHTML = appState.colors.map((c, i) => `
-            <div class="data-item ${colorPicker.selectedColorIndex === i ? 'selected' : ''}" 
-                onclick="window.selectColor(${i})">
-                <div class="color-swatch" style="background-color: rgb(${c.rgb.join(',')})"></div>
-                <div class="roi-info">
-                    <span class="roi-name">${c.name}</span>
-                    <span class="code">HSV Lower: [${c.lower.join(',')}]</span>
-                    <span class="code">HSV Upper: [${c.upper.join(',')}]</span>
-                </div>
-                <button class="remove-btn" onclick="window.removeColor(${i}, event)">&times;</button>
-            </div>
-        `).join('');
+    function showLoading(text = '正在处理...') {
+        document.getElementById('loading-text').textContent = text;
+        loadingOverlay.style.display = 'flex';
     }
 
-    window.selectColor = (index) => {
-        colorPicker.selectedColorIndex = index;
-        const color = appState.colors[index];
-        if (color) {
-            colorPicker.currentColor = {...color};
-            colorPicker.showColorDetails(colorPicker.currentColor);
-            // Toggle highlight
-            appState.showColorHighlight = true;
-        }
-        updateColorUI();
-        imgCanvas.draw();
-    };
-
-    window.removeColor = (index, event) => {
-        if (event) event.stopPropagation();
-        appState.colors.splice(index, 1);
-        if (colorPicker.selectedColorIndex === index) {
-            colorPicker.selectedColorIndex = -1;
-            colorPicker.panel.style.display = 'none';
-        } else if (colorPicker.selectedColorIndex > index) {
-            colorPicker.selectedColorIndex--;
-        }
-        updateColorUI();
-        updateYamlPreview();
-        imgCanvas.draw();
-    };
-
-    async function updateYamlPreview() {
-        if (appState.rois.length === 0 && appState.colors.length === 0) {
-            yamlPreview.textContent = '# 待生成的配置...';
-            appState.yamlOutput = '';
-            return;
-        }
-
-        try {
-            const response = await fetch('/api/generate-config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    game_name: appState.currentGame || 'unknown',
-                    rois: appState.rois,
-                    colors: appState.colors
-                })
-            });
-            const data = await response.json();
-            if (data.yaml) {
-                appState.yamlOutput = data.yaml;
-                yamlPreview.textContent = data.yaml;
-            }
-        } catch (error) {
-            console.error('Failed to generate YAML:', error);
-        }
+    function hideLoading() {
+        loadingOverlay.style.display = 'none';
     }
 
-    // --- Helpers ---
-
-    function throttle(func, wait) {
-        let timeout = null;
-        return function(...args) {
-            if (!timeout) {
-                timeout = setTimeout(() => {
-                    func.apply(this, args);
-                    timeout = null;
-                }, wait);
-            }
-        };
-    }
-
-    const throttledUpdateYaml = throttle(updateYamlPreview, 500);
-
-    // --- Keyboard Shortcuts ---
-    window.addEventListener('keydown', (e) => {
-        // Ignore if typing in input
-        if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
-            if (e.key === 'Escape') document.activeElement.blur();
-            return;
-        }
-
-        const key = e.key.toLowerCase();
-        const ctrl = e.ctrlKey || e.metaKey;
-
-        if (key === 'r') setActiveTool('roi');
-        if (key === 'c') setActiveTool('color');
-        if (key === 'delete' || key === 'backspace') {
-            if (appState.activeTool === 'roi' && roiHandler.selectedIndex !== -1) {
-                window.removeROI(roiHandler.selectedIndex);
-            } else if (appState.activeTool === 'color' && colorPicker.selectedColorIndex !== -1) {
-                window.removeColor(colorPicker.selectedColorIndex);
-            }
-        }
-        if (key === 'escape') {
-            if (appState.activeTool === 'roi') roiHandler.selectedIndex = -1;
-            if (appState.activeTool === 'color') colorPicker.cancelPicker();
-            imgCanvas.draw();
-        }
-
-        // Undo/Redo
-        if (ctrl && key === 'z') {
-            e.preventDefault();
-            const prevState = history.undo();
-            if (prevState) {
-                applyHistorySnapshot(prevState);
-                showStatus('撤销成功');
-            }
-        }
-        if (ctrl && key === 'y' || (ctrl && e.shiftKey && key === 'z')) {
-            e.preventDefault();
-            const nextState = history.redo();
-            if (nextState) {
-                applyHistorySnapshot(nextState);
-                showStatus('重做成功');
-            }
-        }
-    });
-
-    function applyHistorySnapshot(snapshot) {
-        appState.rois = JSON.parse(JSON.stringify(snapshot.rois));
-        appState.colors = JSON.parse(JSON.stringify(snapshot.colors));
-        
-        roiHandler.rois = appState.rois;
-        colorPicker.rois = appState.rois; // if needed
-        
-        updateRoiUI();
-        updateColorUI();
-        updateYamlPreview();
-        imgCanvas.draw();
-    }
-
-    function showLoading(show) {
-        loadingOverlay.style.display = show ? 'flex' : 'none';
-    }
+    // Start!
+    init();
 });

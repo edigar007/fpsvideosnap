@@ -3,174 +3,225 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FPS Video Snap - Config Assistant</title>
+    <title>FPS Video Snap - Config Assistant v2.0</title>
+    
+    <!-- Fonts & Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Styles -->
     <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body class="dark-theme">
-    <div class="app-container">
-        <!-- Sidebar (Left) -->
-        <aside class="sidebar">
-            <div class="logo">
-                <i class="fas fa-crosshairs"></i>
-                <span>Config Assistant</span>
-            </div>
-            
-            <div class="tool-section">
-                <h3>游戏选择</h3>
-                <select id="game-selector" class="game-dropdown">
-                    <option value="">选择游戏...</option>
-                </select>
-            </div>
-
-            <div class="tool-section">
-                <h3>工具栏</h3>
-                <div class="toolbar-buttons">
-                    <button id="tool-roi" class="tool-btn active" title="ROI 区域选择">
-                        <i class="fas fa-vector-square"></i> ROI
-                    </button>
-                    <button id="tool-color" class="tool-btn" title="颜色拾取">
-                        <i class="fas fa-eye-dropper"></i> 颜色
-                    </button>
+    <div class="app-layout">
+        <!-- Top Navigation Bar -->
+        <header class="top-bar">
+            <div class="brand">
+                <i class="fas fa-bolt-lightning logo"></i>
+                <div class="brand-text">
+                    <h1>FPS Video Snap</h1>
+                    <span>Config Assistant v2.0</span>
                 </div>
             </div>
 
-            <div id="color-picker-details" class="tool-section color-details-panel" style="display: none;">
-                <div class="section-header">
-                    <h3>颜色详情</h3>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="toggle-highlight" checked>
-                        <span class="slider round"></span>
-                        <span class="label-text">实时预览</span>
-                    </label>
-                </div>
-                <div class="color-preview-container">
-                    <div class="color-preview-box"></div>
-                    <div class="color-values">
-                        <div class="rgb-value code">RGB: -</div>
-                        <div class="hsv-value code">HSV: -</div>
+            <div class="top-bar-center">
+                <div class="game-control">
+                    <label for="game-selector">当前游戏:</label>
+                    <div class="select-wrapper">
+                        <select id="game-selector">
+                            <option value="">正在加载...</option>
+                        </select>
                     </div>
+                    <button id="add-game-btn" class="icon-btn" title="新增游戏配置"><i class="fas fa-plus"></i></button>
+                </div>
+                <div class="status-indicator">
+                    <span id="status-message" class="status-badge">准备就绪</span>
+                </div>
+            </div>
+
+            <div class="top-bar-actions">
+                <button id="upload-btn" class="btn secondary">
+                    <i class="fas fa-upload"></i> 上传参考图
+                </button>
+                <button id="download-config-btn" class="btn primary">
+                    <i class="fas fa-save"></i> 导出配置
+                </button>
+            </div>
+        </header>
+
+        <main class="workspace">
+            <!-- Left Area: Canvas -->
+            <section class="canvas-panel">
+                <div id="drop-zone" class="drop-hint">
+                    <div class="hint-content">
+                        <i class="fas fa-cloud-arrow-up"></i>
+                        <p>拖拽游戏截图到此处开始配置</p>
+                        <span>支持 PNG, JPG, BMP (推荐推荐 1080p/2k/4k 原图)</span>
+                    </div>
+                </div>
+                <div class="canvas-viewport" id="canvas-viewport">
+                    <canvas id="main-canvas"></canvas>
                 </div>
                 
-                <div class="config-group">
-                    <label>容差 (Tolerance)</label>
-                    <div class="slider-with-value">
-                        <input type="range" id="color-tolerance" min="0" max="50" value="20">
-                        <span class="tolerance-value">20</span>
+                <!-- Floating Toolbar for Canvas -->
+                <div class="canvas-controls">
+                    <button id="zoom-in" title="放大"><i class="fas fa-plus"></i></button>
+                    <button id="zoom-out" title="缩小"><i class="fas fa-minus"></i></button>
+                    <button id="zoom-reset" title="重置缩放"><i class="fas fa-expand"></i></button>
+                    <div class="divider"></div>
+                    <button id="toggle-grid" title="显示网格"><i class="fas fa-border-all"></i></button>
+                </div>
+            </section>
+
+            <!-- Right Area: Tabs -->
+            <aside class="config-tabs-panel">
+                <nav class="tabs-header">
+                    <button class="tab-btn active" data-tab="roi">
+                        <i class="fas fa-vector-square"></i> 区域
+                    </button>
+                    <button class="tab-btn" data-tab="ocr">
+                        <i class="fas fa-font"></i> 文字
+                    </button>
+                    <button class="tab-btn" data-tab="templates">
+                        <i class="fas fa-clone"></i> 模板
+                    </button>
+                    <button class="tab-btn" data-tab="colors">
+                        <i class="fas fa-palette"></i> 颜色
+                    </button>
+                </nav>
+
+                <div class="tabs-content">
+                    <!-- ROI Tab -->
+                    <div class="tab-pane active" id="tab-roi">
+                        <h3>击杀信息流 (Killfeed) 区域</h3>
+                        <p class="desc">请在左侧画布上框选游戏显示击杀信息的区域。</p>
+                        
+                        <div class="form-group">
+                            <label>坐标详情 (归一化 0.0 - 1.0)</label>
+                            <div class="coord-inputs">
+                                <div class="field"><span>X</span> <input type="text" id="roi-x" readonly></div>
+                                <div class="field"><span>Y</span> <input type="text" id="roi-y" readonly></div>
+                                <div class="field"><span>W</span> <input type="text" id="roi-w" readonly></div>
+                                <div class="field"><span>H</span> <input type="text" id="roi-h" readonly></div>
+                            </div>
+                        </div>
+
+                        <div class="alert info">
+                            <i class="fas fa-circle-info"></i>
+                            建议稍大于文字实际范围，以覆盖不同长度的击杀信息。
+                        </div>
+
+                        <div class="roi-zoom-container">
+                            <label>区域预览</label>
+                            <canvas id="roi-preview-canvas" width="300" height="100"></canvas>
+                        </div>
+                        
+                        <button id="save-roi-btn" class="btn success full-width mt-1">
+                            <i class="fas fa-check"></i> 保存区域配置
+                        </button>
                     </div>
-                    <div class="hsv-bounds">
-                        <div class="hsv-lower code">Lower: -</div>
-                        <div class="hsv-upper code">Upper: -</div>
+
+                    <!-- OCR Tab -->
+                    <div class="tab-pane" id="tab-ocr">
+                        <h3>OCR 文字匹配</h3>
+                        <div class="form-group">
+                            <label class="toggle">
+                                <span>启用 OCR 验证</span>
+                                <input type="checkbox" id="ocr-enabled" checked>
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label>关键词 (逗号分隔)</label>
+                            <textarea id="ocr-keywords" placeholder="例如: KILL, ELIMINATED, 击杀了"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>置信度阈值</label>
+                            <input type="range" id="ocr-threshold" min="0" max="1" step="0.05" value="0.8">
+                            <div class="range-value" id="ocr-threshold-val">0.80</div>
+                        </div>
+                    </div>
+
+                    <!-- Templates Tab -->
+                    <div class="tab-pane" id="tab-templates">
+                        <h3>图标模板匹配</h3>
+                        <p class="desc">针对没有固定文字但有固定图标的游戏（如图标变色）。</p>
+                        <div class="template-list" id="template-list">
+                            <!-- Template items added dynamically -->
+                            <div class="empty-state">尚未创建模板</div>
+                        </div>
+                        <button class="btn ghost full-width mt-1" id="add-template-btn">
+                            <i class="fas fa-plus"></i> 捕捉当前 ROI 为模板
+                        </button>
+                    </div>
+
+                    <!-- Colors Tab -->
+                    <div class="tab-pane" id="tab-colors">
+                        <h3>颜色采样检测</h3>
+                        <p class="desc">检测区域内是否出现特定颜色（如血条红色）。</p>
+                        <div id="color-sampler-list"></div>
+                        <button class="btn ghost full-width" id="start-color-sample">
+                            <i class="fas fa-crosshairs"></i> 开启颜色吸管
+                        </button>
                     </div>
                 </div>
+            </aside>
+        </main>
 
-                <div class="config-group">
-                    <label>名称</label>
-                    <input type="text" id="color-name-input" placeholder="例如: enemy_kill_red" class="text-input">
-                </div>
-
-                <div class="panel-actions">
-                    <button id="save-color-btn" class="primary-btn small">保存颜色</button>
-                    <button id="cancel-color-btn" class="text-btn">取消</button>
-                </div>
-            </div>
-
-            <div class="tool-section">
-                <div class="section-header">
-                    <h3>模板管理</h3>
-                </div>
-                <div class="config-group">
-                    <label>游戏名称</label>
-                    <input type="text" id="game-name-input" placeholder="例如: battlefield6" class="text-input">
-                </div>
-                <div class="config-group">
-                    <label>模板名称</label>
-                    <input type="text" id="template-name-input" placeholder="例如: kill_icon" class="text-input">
-                </div>
-                <div class="panel-actions">
-                    <button id="save-template-btn" class="secondary-btn small full-width">
-                        <i class="fas fa-save"></i> 保存模板图片
+        <!-- Bottom Feature: Config Preview Footer -->
+        <footer class="config-preview-bar">
+            <div class="preview-header">
+                <div class="title"><i class="fas fa-code"></i> YAML 实时预览</div>
+                <div class="actions">
+                    <button class="icon-btn" id="copy-config" title="复制到剪贴板">
+                        <i class="fas fa-copy"></i>
                     </button>
                 </div>
             </div>
-
-            <div class="status-footer">
-                <div id="status-message">就绪</div>
+            <div class="preview-body">
+                <pre><code id="config-yaml-preview"># 尚未生成配置...</code></pre>
             </div>
-        </aside>
-
-        <!-- Main Canvas Area (Center) -->
-        <main class="canvas-area">
-            <div id="drop-zone" class="drop-zone">
-                <div class="drop-zone-content">
-                    <i class="fas fa-cloud-upload-alt"></i>
-                    <p>拖拽视频帧或点击上传</p>
-                    <input type="file" id="file-input" accept="image/*" hidden>
-                </div>
-            </div>
-            <div class="canvas-container" id="canvas-container" style="display: none;">
-                <canvas id="main-canvas"></canvas>
-            </div>
-            <div id="loading-overlay" class="loading-overlay" style="display: none;">
-                <div class="spinner"></div>
-                <p>正在处理...</p>
-            </div>
-        </main>
-
-        <!-- Info/Config Panel (Right) -->
-        <section class="info-panel">
-            <div class="panel-section">
-                <h3>当前配置</h3>
-                <div id="current-game-info" class="info-item">
-                    <span class="label">项目:</span>
-                    <span id="display-game-name">-</span>
-                </div>
-            </div>
-
-            <div class="panel-section">
-                <div class="section-header">
-                    <h3>ROI 列表</h3>
-                    <button id="clear-roi" class="text-btn">清空</button>
-                </div>
-                <div id="roi-list" class="data-list">
-                    <!-- ROI items will dynamicly appear here -->
-                    <div class="empty-msg">暂无 ROI</div>
-                </div>
-            </div>
-
-            <div class="panel-section">
-                <div class="section-header">
-                    <h3>颜色列表</h3>
-                    <button id="clear-colors" class="text-btn">清空</button>
-                </div>
-                <div id="color-list" class="data-list">
-                    <!-- Color items will dynamicly appear here -->
-                    <div class="empty-msg">暂无颜色</div>
-                </div>
-            </div>
-
-            <div class="panel-section flex-grow">
-                <div class="section-header">
-                    <h3>YAML 预览</h3>
-                    <button id="copy-yaml" class="text-btn">复制</button>
-                </div>
-                <pre id="yaml-preview" class="code-block"><code># 待生成的配置...</code></pre>
-            </div>
-
-            <div class="action-bar">
-                <button id="download-config" class="secondary-btn">
-                    <i class="fas fa-download"></i> 下载 YAML
-                </button>
-                <button id="save-config" class="primary-btn">保存配置</button>
-            </div>
-        </section>
+        </footer>
     </div>
 
-    <script src="/static/js/canvas.js"></script>
-    <script src="/static/js/history.js"></script>
-    <script src="/static/js/roi.js"></script>
-    <script src="/static/js/colorpicker.js"></script>
-    <script src="/static/js/template.js"></script>
+    <!-- Modals -->
+    <div class="modal" id="add-game-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>新增游戏配置</h2>
+                <button class="close-modal"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>游戏名称 (英文 ID，如: battlefield_6)</label>
+                    <input type="text" id="new-game-name" placeholder="请输入游戏系统 ID">
+                </div>
+                <p class="desc">系统将基于 `default_game_template.yaml` 初始化该配置。</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn secondary close-modal">取消</button>
+                <button class="btn primary" id="confirm-add-game">创建</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden File Input -->
+    <input type="file" id="file-input" accept="image/*" style="display: none;">
+
+    <!-- Background Notifications & Loading -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <div id="loading-text">正在初始化...</div>
+    </div>
+
+    <!-- Scripts (Ordered) -->
+    <script src="/static/js/tabs.js"></script>
+    <script src="/static/js/canvas-state.js"></script>
+    <script src="/static/js/tab-roi.js"></script>
+    <script src="/static/js/tab-ocr.js"></script>
+    <script src="/static/js/tab-template.js"></script>
+    <script src="/static/js/tab-color.js"></script>
+    <script src="/static/js/config-preview.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

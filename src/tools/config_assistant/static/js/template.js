@@ -49,9 +49,20 @@ class TemplateHandler {
             template_name: templateName
         };
 
-        // If a ROI is selected, send its coordinates for cropping
-        if (this.roiHandler.selectedIndex !== -1) {
-            const selectedRoi = this.roiHandler.rois[this.roiHandler.selectedIndex];
+        // Prioritize using the cropRoi if in CROP mode
+        let selectedRoi = null;
+        if (this.roiHandler.mode === 'CROP' && this.roiHandler.cropRoi) {
+            selectedRoi = this.roiHandler.cropRoi;
+            this.showStatus('正在从截图选区保存模板...');
+        } else if (this.roiHandler.selectedIndex !== -1) {
+            // Fallback to detection ROI if one is selected
+            selectedRoi = this.roiHandler.rois[this.roiHandler.selectedIndex];
+            this.showStatus('正在从选中 ROI 保存模板...');
+        } else {
+            this.showStatus('正在保存完整图片为模板...');
+        }
+
+        if (selectedRoi) {
             // Get real coordinates from image data to avoid canvas scaling issues
             const imgWidth = this.appState.imageData.width;
             const imgHeight = this.appState.imageData.height;
@@ -62,9 +73,6 @@ class TemplateHandler {
                 w: Math.round(selectedRoi.w * imgWidth),
                 h: Math.round(selectedRoi.h * imgHeight)
             };
-            this.showStatus('正在保存裁剪后的模板...');
-        } else {
-            this.showStatus('正在保存完整图片为模板...');
         }
 
         try {
@@ -77,7 +85,16 @@ class TemplateHandler {
             const data = await response.json();
             if (data.error) throw new Error(data.error);
 
+            // Associate template with current configurations via AppState
+            this.appState.addTemplate(templateName, data.path);
+
             this.showStatus(`模板已保存: ${data.path}`, 'success');
+
+            // Reset mode and clear crop after successful save
+            if (this.roiHandler.mode === 'CROP') {
+                this.roiHandler.setMode('DETECTION');
+                this.roiHandler.cropRoi = null;
+            }
         } catch (error) {
             console.error('Failed to save template:', error);
             this.showStatus('保存模板失败: ' + error.message, 'error');

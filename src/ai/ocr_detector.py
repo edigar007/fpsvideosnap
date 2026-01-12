@@ -52,14 +52,10 @@ class OCRDetector:
         
         if HAS_PADDLEOCR:
             try:
-                self.ocr_engine = PaddleOCR(
-                    use_angle_cls=True, 
-                    lang=self.lang, 
-                    use_gpu=self.use_gpu, 
-                    show_log=False
-                )
+                # PaddleOCR 3.x 只使用最基本的参数
+                self.ocr_engine = PaddleOCR(use_angle_cls=True, lang=self.lang)
                 self.engine_type = 'paddle'
-                logger.info(f"Initialized PaddleOCR (lang={lang}, gpu={use_gpu})")
+                logger.info(f"Initialized PaddleOCR (lang={lang})")
             except Exception as e:
                 logger.error(f"Failed to initialize PaddleOCR: {e}")
 

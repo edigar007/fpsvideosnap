@@ -1,27 +1,23 @@
 import os
 import shutil
-import yaml
-from flask import Blueprint, request, jsonify, current_app
+import cv2
+import numpy as np
+from flask import Blueprint, request, jsonify, current_app, send_from_directory
 from PIL import Image
-from src.tools.config_assistant.utils import (
-    rgb_to_hsv,
-    calculate_hsv_range,
-    sanitize_filename,
-    validate_identifier,
-    safe_join,
-)
+from src.tools.config_assistant.utils import rgb_to_hsv, calculate_hsv_range, validate_identifier
+from src.tools.config_assistant.ocr_service import ocr_service
+from src.tools.config_assistant.config_manager import config_manager, PROJECT_ROOT # Imported PROJECT_ROOT
 from src.utils.logger import get_logger
 
 logger = get_logger("config_assistant.api")
 api_bp = Blueprint("api", __name__)
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'bmp'}
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-TEMPLATE_ROOT = os.path.join(PROJECT_ROOT, "models", "templates")
-CONFIG_GAMES_DIR = os.path.join(PROJECT_ROOT, "config", "games")
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# --- General API ---
 
 @api_bp.route("/upload", methods=["POST"])
 def upload_file():
@@ -30,72 +26,396 @@ def upload_file():
     file = request.files['file']
     if file.filename == '':
         return jsonify({"error": "No selected file"}), 400
-    if file:
-        try:
-            safe_name = sanitize_filename(file.filename)
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
-
-        if not allowed_file(safe_name):
-            return jsonify({"error": "File type not allowed"}), 400
-
+    if file and allowed_file(file.filename):
         upload_folder = current_app.config['UPLOAD_FOLDER']
-        os.makedirs(upload_folder, exist_ok=True)
-        try:
-            filepath = safe_join(upload_folder, safe_name)
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
-
+        if not os.path.exists(upload_folder):
+            os.makedirs(upload_folder, exist_ok=True)
+        
+        filepath = os.path.join(upload_folder, file.filename)
         file.save(filepath)
         
         with Image.open(filepath) as img:
             width, height = img.size
             
         return jsonify({
-            "url": f"/uploads/{safe_name}",
+            "url": f"/uploads/{file.filename}",
             "path": filepath,
             "width": width,
             "height": height
         })
     return jsonify({"error": "File type not allowed"}), 400
 
-@api_bp.route("/pick-color", methods=["POST"])
-def pick_color():
+# --- Game Management API ---
+
+@api_bp.route("/game/list", methods=["GET"])
+def list_games():
+    games = config_manager.list_games()
+    return jsonify({"games": games})
+
+@api_bp.route("/game/create", methods=["POST"])
+def create_game():
     data = request.json
-    if not data:
-        return jsonify({"error": "No data provided"}), 400
-        
-    image_path = data.get("image_path")
-    x = data.get("x")
-    y = data.get("y")
+    game_name = data.get("game_name")
+    try:
+        game_name = validate_identifier(game_name, "game_name")
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    if config_manager.create_game(game_name):
+        return jsonify({"message": f"Game '{game_name}' created successfully", "game": game_name})
+    else:
+        return jsonify({"error": f"Failed to create game '{game_name}'. It might already exist."}), 400
+
+# --- Configuration API ---
+
+@api_bp.route("/config/<game>", methods=["GET"])
+def get_config(game):
+    config = config_manager.get_config(game)
+    if config:
+        return jsonify(config)
+    return jsonify({"error": f"Config for {game} not found"}), 404
+
+@api_bp.route("/config/<game>/roi", methods=["PUT"])
+def update_roi(game):
+    data = request.json
+    roi = data.get("roi") # [x, y, w, h] as relative coordinates
+    if not isinstance(roi, list) or len(roi) != 4:
+        return jsonify({"error": "Invalid ROI format. Expected [x, y, w, h]"}), 400
     
-    if image_path is None or x is None or y is None:
-        return jsonify({"error": "Missing parameters"}), 400
+    if config_manager.update_config_section(game, "detection.killfeed_roi", roi):
+        # Return updated config for preview
+        config = config_manager.get_config(game)
+        return jsonify({"message": "ROI updated successfully", "config": config})
+    return jsonify({"error": "Failed to update ROI"}), 500
+
+@api_bp.route("/config/<game>/ocr", methods=["PUT"])
+def update_ocr(game):
+    data = request.json
+    enabled = data.get("enabled", True)
+    keywords = data.get("keywords")
+    similarity = data.get("similarity_threshold", 0.8)
+    
+    if not isinstance(keywords, list):
+        return jsonify({"error": "Keywords must be a list"}), 400
+        
+    config_manager.update_config_section(game, "detection.ocr.enabled", enabled)
+    config_manager.update_config_section(game, "detection.ocr.keywords", keywords)
+    config_manager.update_config_section(game, "detection.ocr.similarity_threshold", similarity)
+    
+    # Return updated config for preview
+    config = config_manager.get_config(game)
+    return jsonify({"message": "OCR configuration updated successfully", "config": config})
+
+@api_bp.route("/config/<game>/templates", methods=["PUT", "POST"])
+def update_templates_config(game):
+    data = request.json
+    
+    # POST: Add a single template
+    if request.method == "POST":
+        name = data.get("name")
+        roi = data.get("roi")
+        path = data.get("path")
+        threshold = data.get("threshold", 0.8)
+        
+        if not name or not roi:
+            return jsonify({"error": "name and roi are required"}), 400
+        
+        # Get current templates
+        config = config_manager.get_config(game)
+        if not config:
+            return jsonify({"error": f"Config for {game} not found"}), 404
+            
+        templates = config.get("detection", {}).get("templates", {})
+        template_data = {"roi": roi, "threshold": threshold}
+        if path:
+            template_data["path"] = path
+        templates[name] = template_data
+        
+        if config_manager.update_config_section(game, "detection.templates", templates):
+            config = config_manager.get_config(game)
+            return jsonify({"message": f"Template '{name}' added successfully", "config": config})
+        return jsonify({"error": "Failed to add template"}), 500
+    
+    # PUT: Update all templates
+    templates = data.get("templates")
+    if not isinstance(templates, dict):
+        return jsonify({"error": "Templates must be a dictionary"}), 400
+        
+    if config_manager.update_config_section(game, "detection.templates", templates):
+        config = config_manager.get_config(game)
+        return jsonify({"message": "Templates configuration updated successfully", "config": config})
+    return jsonify({"error": "Failed to update templates configuration"}), 500
+
+@api_bp.route("/config/<game>/templates/<name>/threshold", methods=["PATCH"])
+def update_template_threshold(game, name):
+    data = request.json
+    threshold = data.get("threshold")
+    
+    if threshold is None:
+        return jsonify({"error": "threshold is required"}), 400
+    
+    config = config_manager.get_config(game)
+    if not config:
+        return jsonify({"error": f"Config for {game} not found"}), 404
+    
+    templates = config.get("detection", {}).get("templates", {})
+    if name not in templates:
+        return jsonify({"error": f"Template '{name}' not found"}), 404
+    
+    templates[name]["threshold"] = threshold
+    
+    if config_manager.update_config_section(game, "detection.templates", templates):
+        config = config_manager.get_config(game)
+        return jsonify({"message": f"Template '{name}' threshold updated", "config": config})
+    return jsonify({"error": "Failed to update threshold"}), 500
+
+@api_bp.route("/config/<game>/templates/<name>", methods=["DELETE"])
+def delete_template_from_config(game, name):
+    config = config_manager.get_config(game)
+    if not config:
+        return jsonify({"error": f"Config for {game} not found"}), 404
+    
+    templates = config.get("detection", {}).get("templates", {})
+    if name not in templates:
+        return jsonify({"error": f"Template '{name}' not found"}), 404
+    
+    del templates[name]
+    
+    if config_manager.update_config_section(game, "detection.templates", templates):
+        config = config_manager.get_config(game)
+        return jsonify({"message": f"Template '{name}' deleted from config", "config": config})
+    return jsonify({"error": "Failed to delete template"}), 500
+
+@api_bp.route("/config/<game>/colors", methods=["PUT", "POST"])
+def update_colors(game):
+    data = request.json
+    
+    # POST: Add a single color
+    if request.method == "POST":
+        name = data.get("name")
+        hsv_lower = data.get("hsv_lower")
+        hsv_upper = data.get("hsv_upper")
+        tolerance = data.get("tolerance", 20)
+        
+        if not name or hsv_lower is None or hsv_upper is None:
+            return jsonify({"error": "name, hsv_lower and hsv_upper are required"}), 400
+        
+        # Get current colors
+        config = config_manager.get_config(game)
+        if not config:
+            return jsonify({"error": f"Config for {game} not found"}), 404
+            
+        colors = config.get("detection", {}).get("colors", {})
+        colors[name] = {
+            "hsv_lower": hsv_lower,
+            "hsv_upper": hsv_upper,
+            "tolerance": tolerance
+        }
+        
+        if config_manager.update_config_section(game, "detection.colors", colors):
+            config = config_manager.get_config(game)
+            return jsonify({"message": f"Color '{name}' added successfully", "config": config})
+        return jsonify({"error": "Failed to add color"}), 500
+    
+    # PUT: Update all colors
+    colors = data.get("colors")
+    if not isinstance(colors, dict):
+        return jsonify({"error": "Colors must be a dictionary"}), 400
+        
+    if config_manager.update_config_section(game, "detection.colors", colors):
+        config = config_manager.get_config(game)
+        return jsonify({"message": "Colors configuration updated successfully", "config": config})
+    return jsonify({"error": "Failed to update colors configuration"}), 500
+
+@api_bp.route("/config/<game>/colors/<name>/tolerance", methods=["PATCH"])
+def update_color_tolerance(game, name):
+    data = request.json
+    tolerance = data.get("tolerance")
+    
+    if tolerance is None:
+        return jsonify({"error": "tolerance is required"}), 400
+    
+    config = config_manager.get_config(game)
+    if not config:
+        return jsonify({"error": f"Config for {game} not found"}), 404
+    
+    colors = config.get("detection", {}).get("colors", {})
+    if name not in colors:
+        return jsonify({"error": f"Color '{name}' not found"}), 404
+    
+    # Recalculate hsv_lower and hsv_upper based on new tolerance
+    color = colors[name]
+    # Assuming we have the original HSV value stored, or we use the midpoint
+    # For simplicity, let's just update the tolerance value
+    color["tolerance"] = tolerance
+    
+    if config_manager.update_config_section(game, "detection.colors", colors):
+        config = config_manager.get_config(game)
+        return jsonify({"message": f"Color '{name}' tolerance updated", "config": config})
+    return jsonify({"error": "Failed to update tolerance"}), 500
+
+@api_bp.route("/config/<game>/colors/<name>", methods=["DELETE"])
+def delete_color_from_config(game, name):
+    config = config_manager.get_config(game)
+    if not config:
+        return jsonify({"error": f"Config for {game} not found"}), 404
+    
+    colors = config.get("detection", {}).get("colors", {})
+    if name not in colors:
+        return jsonify({"error": f"Color '{name}' not found"}), 404
+    
+    del colors[name]
+    
+    if config_manager.update_config_section(game, "detection.colors", colors):
+        config = config_manager.get_config(game)
+        return jsonify({"message": f"Color '{name}' deleted from config", "config": config})
+    return jsonify({"error": "Failed to delete color"}), 500
+
+@api_bp.route("/config/<game>/export", methods=["GET"])
+def export_config(game):
+    yaml_str = config_manager.export_config_yaml(game)
+    if yaml_str:
+        return jsonify({"yaml": yaml_str})
+    return jsonify({"error": f"Failed to export config for {game}"}), 404
+
+# --- OCR API ---
+
+@api_bp.route("/ocr/detect", methods=["POST"])
+def ocr_detect():
+    data = request.json
+    image_path = data.get("image_path")
+    roi = data.get("roi") # [x, y, w, h] relative
+    
+    logger.info(f"OCR API called with image_path={image_path}, roi={roi}")
+    
+    if not image_path:
+        logger.error("OCR API: image_path is missing")
+        return jsonify({"error": "image_path is required"}), 400
     
     if not os.path.exists(image_path):
-        return jsonify({"error": "Image not found at " + str(image_path)}), 404
+        logger.error(f"OCR API: image file not found: {image_path}")
+        return jsonify({"error": f"Image file not found: {image_path}"}), 404
+    
+    try:
+        results = ocr_service.detect(image_path, roi)
+        logger.info(f"OCR API returning {len(results)} results")
+        return jsonify({"results": results})
+    except Exception as e:
+        logger.error(f"OCR API error: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+# --- Template API ---
+
+@api_bp.route("/template/crop", methods=["POST"])
+def crop_template():
+    data = request.json
+    image_path = data.get("image_path")
+    game = data.get("game")
+    name = data.get("name")
+    roi = data.get("roi") # [x, y, w, h] relative (main ROI)
+    sub_roi = data.get("sub_roi") # [x, y, w, h] relative (sub ROI within main ROI or absolute relative to image)
+    
+    if not all([image_path, game, name, sub_roi]):
+        return jsonify({"error": "Missing parameters"}), 400
+        
+    try:
+        name = validate_identifier(name, "template_name")
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    target_dir = os.path.join(PROJECT_ROOT, "models", "templates", game)
+    os.makedirs(target_dir, exist_ok=True)
+    target_path = os.path.join(target_dir, f"{name}.png")
+    
+    try:
+        with Image.open(image_path) as img:
+            w, h = img.size
+            # sub_roi is relative [x, y, w, h]
+            left = int(sub_roi[0] * w)
+            top = int(sub_roi[1] * h)
+            right = int((sub_roi[0] + sub_roi[2]) * w)
+            bottom = int((sub_roi[1] + sub_roi[3]) * h)
+            
+            cropped = img.crop((left, top, right, bottom))
+            cropped.save(target_path)
+            
+        rel_path = f"models/templates/{game}/{name}.png"
+        return jsonify({"message": "Template cropped successfully", "path": rel_path})
+    except Exception as e:
+        logger.error(f"Error cropping template: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route("/template/<game>/list", methods=["GET"])
+def list_templates(game):
+    target_dir = os.path.join(PROJECT_ROOT, "models", "templates", game)
+    if not os.path.exists(target_dir):
+        return jsonify([])
+        
+    templates = []
+    for filename in os.listdir(target_dir):
+        if filename.endswith((".png", ".jpg", ".jpeg")):
+            templates.append({
+                "name": os.path.splitext(filename)[0],
+                "filename": filename,
+                "url": f"/api/template/{game}/view/{filename}"
+            })
+    return jsonify(templates)
+
+@api_bp.route("/template/<game>/view/<filename>", methods=["GET"])
+def view_template(game, filename):
+    target_dir = os.path.join(PROJECT_ROOT, "models", "templates", game)
+    return send_from_directory(target_dir, filename)
+
+@api_bp.route("/template/<game>/<name>", methods=["DELETE"])
+def delete_template(game, name):
+    target_dir = os.path.join(PROJECT_ROOT, "models", "templates", game)
+    # Try different extensions
+    deleted = False
+    for ext in [".png", ".jpg", ".jpeg"]:
+        target_path = os.path.join(target_dir, f"{name}{ext}")
+        if os.path.exists(target_path):
+            os.remove(target_path)
+            deleted = True
+            break
+            
+    if deleted:
+        return jsonify({"message": f"Template '{name}' deleted"})
+    return jsonify({"error": f"Template '{name}' not found"}), 404
+
+# --- Color API ---
+
+@api_bp.route("/color/pick", methods=["POST"])
+def pick_color():
+    data = request.json
+    image_path = data.get("image_path")
+    x_rel = data.get("x") # relative 0-1
+    y_rel = data.get("y") # relative 0-1
+    tolerance = data.get("tolerance", [10, 50, 50])
+    
+    if image_path is None or x_rel is None or y_rel is None:
+        return jsonify({"error": "Missing parameters"}), 400
+        
+    if not os.path.exists(image_path):
+        return jsonify({"error": "Image not found"}), 404
         
     try:
         with Image.open(image_path) as img:
-            width, height = img.size
-            try:
-                x_int = int(x)
-                y_int = int(y)
-            except (TypeError, ValueError):
-                return jsonify({"error": "Pixel coordinates must be integers"}), 400
-
-            if not (0 <= x_int < width and 0 <= y_int < height):
-                return jsonify({"error": "Pixel coordinates out of bounds"}), 400
-
-            rgb = img.convert("RGB").getpixel((x_int, y_int))
+            w, h = img.size
+            x = int(x_rel * w)
+            y = int(y_rel * h)
+            # Ensure within bounds
+            x = max(0, min(w - 1, x))
+            y = max(0, min(h - 1, y))
+            
+            rgb = img.convert("RGB").getpixel((x, y))
             r, g, b = rgb
             
-        h, s, v = rgb_to_hsv(r, g, b)
-        lower, upper = calculate_hsv_range(h, s, v)
+        h_val, s_val, v_val = rgb_to_hsv(r, g, b)
+        lower, upper = calculate_hsv_range(h_val, s_val, v_val, tuple(tolerance))
         
         return jsonify({
             "rgb": [r, g, b],
-            "hsv": [h, s, v],
+            "hsv": [h_val, s_val, v_val],
             "hsv_range": {
                 "lower": lower,
                 "upper": upper
@@ -105,172 +425,37 @@ def pick_color():
         logger.error(f"Error picking color: {e}")
         return jsonify({"error": str(e)}), 500
 
-@api_bp.route("/save-template", methods=["POST"])
-def save_template():
+@api_bp.route("/color/preview", methods=["POST"])
+def preview_color():
     data = request.json
-    if not data:
-        return jsonify({"error": "No data provided"}), 400
-        
     image_path = data.get("image_path")
-    game_name = data.get("game_name")
-    template_name = data.get("template_name")
-    roi = data.get("roi") # {x, y, w, h} in pixels
+    roi = data.get("roi") # [x, y, w, h] relative
+    lower = data.get("lower") # [h, s, v]
+    upper = data.get("upper") # [h, s, v]
     
-    if not all([image_path, game_name, template_name]):
+    if not all([image_path, lower, upper]):
         return jsonify({"error": "Missing parameters"}), 400
-
+        
     try:
-        safe_game = validate_identifier(game_name, "game_name")
-        safe_template = validate_identifier(template_name, "template_name")
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-
-    target_dir = safe_join(TEMPLATE_ROOT, safe_game)
-    os.makedirs(target_dir, exist_ok=True)
-    target_path = safe_join(target_dir, f"{safe_template}.png")
-    try:
+        image = cv2.imread(image_path)
+        if image is None:
+            return jsonify({"error": "Failed to load image"}), 400
+            
+        h_img, w_img = image.shape[:2]
         if roi:
-            try:
-                left = int(roi['x'])
-                top = int(roi['y'])
-                width = int(roi['w'])
-                height = int(roi['h'])
-            except (KeyError, TypeError, ValueError):
-                return jsonify({"error": "Invalid ROI payload"}), 400
-
-            if width <= 0 or height <= 0:
-                return jsonify({"error": "ROI width/height must be positive"}), 400
-
-            with Image.open(image_path) as img:
-                img_width, img_height = img.size
-                left = max(0, min(left, img_width))
-                top = max(0, min(top, img_height))
-                right = max(left, min(left + width, img_width))
-                bottom = max(top, min(top + height, img_height))
-                if right == left or bottom == top:
-                    return jsonify({"error": "ROI is outside of image bounds"}), 400
-                cropped = img.crop((left, top, right, bottom))
-                cropped.save(target_path)
+            rx, ry, rw, rh = roi
+            x1, y1 = int(rx * w_img), int(ry * h_img)
+            x2, y2 = int((rx + rw) * w_img), int((ry + rh) * h_img)
+            region = image[y1:y2, x1:x2]
         else:
-            shutil.copy(image_path, target_path)
-        return jsonify({"message": f"Template saved to {target_path}", "path": target_path})
-    except Exception as e:
-        logger.error(f"Error saving template: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@api_bp.route("/games", methods=["GET"])
-def list_games():
-    games_dir = CONFIG_GAMES_DIR
-    if not os.path.exists(games_dir):
-        return jsonify([])
-    
-    games = []
-    for f in os.listdir(games_dir):
-        if f.endswith(".yaml"):
-            games.append(f.replace(".yaml", ""))
-    return jsonify(games)
-
-@api_bp.route("/generate-config", methods=["POST"])
-def generate_config():
-    data = request.json
-    if not data:
-        return jsonify({"error": "No data provided"}), 400
+            region = image
+            
+        hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
         
-    raw_game = data.get("game_name") or "unknown"
-    try:
-        game_name = validate_identifier(raw_game, "game_name")
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    rois = data.get("rois", [])
-    colors = data.get("colors", [])
-    
-    # Transform colors to dictionary structure
-    color_dict = {}
-    for c in colors:
-        name = c.get("name", "color").replace(" ", "_").lower()
-        color_dict[name] = {
-            "lower": c.get("lower"),
-            "upper": c.get("upper")
-        }
-
-    config_dict = {
-        "game_name": game_name,
-        "detection": {
-            "colors": color_dict,
-            "template_dir": f"models/templates/{game_name}"
-        },
-        "highlights": {
-            "pre_kill_time": 5.0,
-            "post_kill_time": 1.5
-        }
-    }
-
-    # Map ROIs - if one is named killfeed_roi, use it specifically
-    for r in rois:
-        try:
-            name = r.get("name", "roi").replace(" ", "_").lower()
-            key = f"{name}_roi" if not name.endswith("_roi") else name
-            config_dict["detection"][key] = [
-                round(float(r['x']), 4),
-                round(float(r['y']), 4),
-                round(float(r['w']), 4),
-                round(float(r['h']), 4)
-            ]
-        except (KeyError, ValueError, TypeError):
-            return jsonify({"error": "Invalid ROI data"}), 400
-
-    class FlowDumper(yaml.SafeDumper):
-        pass
-
-    def list_representer(dumper, data):
-        return dumper.represent_sequence('tag:yaml.org,2002:seq', data, flow_style=True)
-
-    FlowDumper.add_representer(list, list_representer)
-    yaml_str = yaml.dump(config_dict, sort_keys=False, allow_unicode=True, Dumper=FlowDumper)
-    return jsonify({"yaml": yaml_str})
-
-@api_bp.route("/save-config", methods=["POST"])
-def save_config_file():
-    data = request.json
-    if not data or 'yaml' not in data or 'game_name' not in data:
-        return jsonify({"error": "Missing data"}), 400
-    
-    try:
-        game_name = validate_identifier(data['game_name'], "game_name")
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    yaml_content = data['yaml']
-    
-    config_dir = CONFIG_GAMES_DIR
-    os.makedirs(config_dir, exist_ok=True)
-    try:
-        file_path = safe_join(config_dir, f"{game_name}.yaml")
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    try:
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(yaml_content)
-        return jsonify({"message": f"Config saved to {file_path}", "path": file_path})
+        # Encode mask as PNG and return as blob
+        _, buffer = cv2.imencode('.png', mask)
+        return buffer.tobytes(), 200, {'Content-Type': 'image/png'}
     except Exception as e:
-        logger.error(f"Error saving config: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@api_bp.route("/load-config/<game_name>", methods=["GET"])
-def load_config(game_name):
-    # Try looking in config/games/{game_name}.yaml
-    try:
-        safe_game = validate_identifier(game_name, "game_name")
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-
-    config_path = safe_join(CONFIG_GAMES_DIR, f"{safe_game}.yaml")
-    if not os.path.exists(config_path):
-        return jsonify({"error": f"Config for {game_name} not found"}), 404
-        
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config_data = yaml.safe_load(f)
-        return jsonify(config_data)
-    except Exception as e:
-        logger.error(f"Error loading config: {e}")
+        logger.error(f"Error previewing color: {e}")
         return jsonify({"error": str(e)}), 500

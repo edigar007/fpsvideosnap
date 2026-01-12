@@ -1,35 +1,50 @@
-game_name: "Battlefield 6"
+game_name: battlefield6
 detection:
-  colors:
-    play_kill_color:
-      lower: [126, 102, 152]
-      upper: [166, 182, 232]
-  template_dir: models/templates/battlefield6
-  roi_1_roi: [0.2632, 0.4834, 0.2244, 0.3159]
-  
   ocr:
     enabled: true
-    keywords: ["击杀", "KILL", "击毙"]
-    similarity_threshold: 0.8
-    lang: "ch"
-    
+    keywords:
+    - 击杀
+    similarity_threshold: 0.65
   templates:
-    skull_icon:
-      path: "skull_bf6.png"
-      threshold: 0.75
-    kill_icon:
-      path: "kill_bf6.png"
-      threshold: 0.75
-      
+    '111111':
+      roi:
+      - 0.46581196581196604
+      - 0.41549295774647865
+      - 0.12393162393162382
+      - 0.19718309859154948
+      threshold: 0.8
+      path: models/templates/battlefield6/111111.png
   weights:
-    ocr: 0.5
+    ocr: 0.4
     template: 0.3
-    color: 0.1
+    color: 0.2
     yolo: 0.1
-    
-  prefilter:
-    color_threshold: 0.005 # BF6 might have smaller kill icons
-    
+  killfeed_roi:
+  - 0.27480914720142163
+  - 0.5393675010622913
+  - 0.20095419847328239
+  - 0.21679389312977104
+  colors:
+    kill_red:
+      hsv_lower:
+      - 147
+      - 25
+      - 43
+      hsv_upper:
+      - 180
+      - 105
+      - 123
+      tolerance: 20
+    aaaaaa:
+      hsv_lower:
+      - 125
+      - 102
+      - 185
+      hsv_upper:
+      - 165
+      - 182
+      - 255
+      tolerance: 20
 highlights:
   pre_kill_time: 5.0
   post_kill_time: 1.5

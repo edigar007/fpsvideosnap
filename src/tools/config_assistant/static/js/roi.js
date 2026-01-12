@@ -9,8 +9,11 @@ class ROIHandler {
         this.onUpdate = onUpdate; // Callback when ROIs change
         this.enabled = true; // Toggle tool
 
+        this.mode = 'DETECTION'; // 'DETECTION' or 'CROP'
         this.rois = [];
-        this.selectedIndex = -1;
+        this.cropRoi = null;
+        this.selectedIndex = -1; // -2 for cropRoi
+        
         this.isDrawing = false;
         this.isDragging = false;
         this.isResizing = false;
@@ -33,6 +36,17 @@ class ROIHandler {
         window.addEventListener('keydown', this.handleKeyDown.bind(this));
     }
 
+    setMode(mode) {
+        if (this.mode === mode) return;
+        this.mode = mode;
+        this.selectedIndex = -1;
+        this.isDrawing = false;
+        this.isDragging = false;
+        this.isResizing = false;
+        this.imageCanvas.draw();
+        this.onUpdate();
+    }
+
     handleMouseDown(e) {
         if (!this.enabled || !this.imageCanvas.image) return;
         const rect = this.canvas.getBoundingClientRect();
@@ -41,29 +55,47 @@ class ROIHandler {
 
         // Check if clicked on a handle of the selected ROI
         if (this.selectedIndex !== -1) {
-            const handle = this.getHandleAt(x, y, this.rois[this.selectedIndex]);
-            if (handle) {
-                this.isResizing = true;
-                this.resizeHandle = handle;
-                this.startPos = { x, y };
-                return;
+            const selectedROI = this.selectedIndex === -2 ? this.cropRoi : this.rois[this.selectedIndex];
+            if (selectedROI) {
+                const handle = this.getHandleAt(x, y, selectedROI);
+                if (handle) {
+                    this.isResizing = true;
+                    this.resizeHandle = handle;
+                    this.startPos = { x, y };
+                    return;
+                }
             }
         }
 
         // Check if clicked inside an ROI (to select/drag)
-        const clickedIndex = this.getROIAt(x, y);
-        if (clickedIndex !== -1) {
-            this.selectedIndex = clickedIndex;
-            this.isDragging = true;
-            const roi = this.rois[this.selectedIndex];
-            const canvasRect = this.roiToCanvas(roi);
-            this.dragOffset = {
-                x: x - canvasRect.x,
-                y: y - canvasRect.y
-            };
-            this.onUpdate();
-            this.imageCanvas.draw(); // Redraw with selection
-            return;
+        if (this.mode === 'CROP') {
+            if (this.cropRoi && this.isPointInROI(x, y, this.cropRoi)) {
+                this.selectedIndex = -2;
+                this.isDragging = true;
+                const canvasRect = this.roiToCanvas(this.cropRoi);
+                this.dragOffset = {
+                    x: x - canvasRect.x,
+                    y: y - canvasRect.y
+                };
+                this.onUpdate();
+                this.imageCanvas.draw();
+                return;
+            }
+        } else {
+            const clickedIndex = this.getROIAt(x, y);
+            if (clickedIndex !== -1) {
+                this.selectedIndex = clickedIndex;
+                this.isDragging = true;
+                const roi = this.rois[this.selectedIndex];
+                const canvasRect = this.roiToCanvas(roi);
+                this.dragOffset = {
+                    x: x - canvasRect.x,
+                    y: y - canvasRect.y
+                };
+                this.onUpdate();
+                this.imageCanvas.draw(); // Redraw with selection
+                return;
+            }
         }
 
         // Otherwise, start drawing a new ROI
@@ -85,7 +117,7 @@ class ROIHandler {
             this.imageCanvas.draw();
             this.drawPreview();
         } else if (this.isDragging && this.selectedIndex !== -1) {
-            const roi = this.rois[this.selectedIndex];
+            const roi = this.selectedIndex === -2 ? this.cropRoi : this.rois[this.selectedIndex];
             const canvasRect = this.roiToCanvas(roi);
             
             let newX = x - this.dragOffset.x;
@@ -125,7 +157,12 @@ class ROIHandler {
 
             if (w > 5 && h > 5) {
                 const rel = this.canvasToRelative(x, y, w, h);
-                this.addROI(`ROI ${this.rois.length + 1}`, rel.x, rel.y, rel.w, rel.h);
+                if (this.mode === 'CROP') {
+                    this.cropRoi = { name: 'Crop Area', ...rel };
+                    this.selectedIndex = -2;
+                } else {
+                    this.addROI(`ROI ${this.rois.length + 1}`, rel.x, rel.y, rel.w, rel.h);
+                }
             }
         }
         this.isDrawing = false;
@@ -133,6 +170,7 @@ class ROIHandler {
         this.isResizing = false;
         this.resizeHandle = null;
         this.imageCanvas.draw();
+        this.onUpdate();
     }
 
     handleKeyDown(e) {
@@ -150,7 +188,12 @@ class ROIHandler {
     }
 
     deleteSelected() {
-        if (this.selectedIndex !== -1) {
+        if (this.selectedIndex === -2) {
+            this.cropRoi = null;
+            this.selectedIndex = -1;
+            this.onUpdate();
+            this.imageCanvas.draw();
+        } else if (this.selectedIndex !== -1) {
             this.rois.splice(this.selectedIndex, 1);
             this.selectedIndex = -1;
             this.onUpdate();
@@ -158,8 +201,14 @@ class ROIHandler {
         }
     }
 
+    isPointInROI(x, y, roi) {
+        const rect = this.roiToCanvas(roi);
+        return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
+    }
+
     clearAll() {
         this.rois = [];
+        this.cropRoi = null;
         this.selectedIndex = -1;
         this.onUpdate();
         this.imageCanvas.draw();
@@ -195,7 +244,8 @@ class ROIHandler {
     }
 
     performResize(x, y) {
-        const roi = this.rois[this.selectedIndex];
+        const roi = this.selectedIndex === -2 ? this.cropRoi : this.rois[this.selectedIndex];
+        if (!roi) return;
         const rect = this.roiToCanvas(roi);
         let x1 = rect.x;
         let y1 = rect.y;
@@ -221,15 +271,24 @@ class ROIHandler {
     }
 
     updateCursor(x, y) {
+        let activeROI = null;
         if (this.selectedIndex !== -1) {
-            const handle = this.getHandleAt(x, y, this.rois[this.selectedIndex]);
+            activeROI = this.selectedIndex === -2 ? this.cropRoi : this.rois[this.selectedIndex];
+        }
+
+        if (activeROI) {
+            const handle = this.getHandleAt(x, y, activeROI);
             if (handle) {
                 this.canvas.style.cursor = (handle === 'tl' || handle === 'br') ? 'nwse-resize' : 'nesw-resize';
                 return;
             }
         }
         
-        if (this.getROIAt(x, y) !== -1) {
+        const isOverROI = this.mode === 'CROP' ? 
+            (this.cropRoi && this.isPointInROI(x, y, this.cropRoi)) : 
+            (this.getROIAt(x, y) !== -1);
+
+        if (isOverROI) {
             this.canvas.style.cursor = 'move';
         } else {
             this.canvas.style.cursor = 'crosshair';
@@ -237,20 +296,25 @@ class ROIHandler {
     }
 
     render() {
+        // Draw detection ROIs
         this.rois.forEach((roi, index) => {
             const rect = this.roiToCanvas(roi);
-            const isSelected = index === this.selectedIndex;
+            const isSelected = (this.mode === 'DETECTION' && index === this.selectedIndex);
 
             // Draw rect
             this.ctx.strokeStyle = isSelected ? '#00ff00' : '#ffff00';
             this.ctx.lineWidth = 2;
             this.ctx.fillStyle = isSelected ? 'rgba(0, 255, 0, 0.2)' : 'rgba(255, 255, 0, 0.1)';
+            if (this.mode === 'CROP') {
+                this.ctx.strokeStyle = 'rgba(255, 255, 0, 0.4)'; // Faded rois in CROP mode
+                this.ctx.fillStyle = 'rgba(255, 255, 0, 0.05)';
+            }
             
             this.ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
             this.ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
 
             // Draw label
-            this.ctx.fillStyle = isSelected ? '#00ff00' : '#ffff00';
+            this.ctx.fillStyle = this.ctx.strokeStyle;
             this.ctx.font = '12px Arial';
             this.ctx.fillText(roi.name, rect.x, rect.y - 5);
 
@@ -259,6 +323,33 @@ class ROIHandler {
                 this.drawHandles(rect);
             }
         });
+
+        // Draw Crop ROI
+        if (this.cropRoi) {
+            const rect = this.roiToCanvas(this.cropRoi);
+            const isSelected = (this.selectedIndex === -2);
+
+            this.ctx.save();
+            this.ctx.strokeStyle = '#3498db';
+            this.ctx.lineWidth = 2;
+            this.ctx.setLineDash([5, 5]);
+            this.ctx.fillStyle = isSelected ? 'rgba(52, 152, 219, 0.2)' : 'rgba(52, 152, 219, 0.1)';
+            
+            this.ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
+            this.ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+
+            // Draw label
+            this.ctx.setLineDash([]);
+            this.ctx.fillStyle = '#3498db';
+            this.ctx.font = 'bold 12px Arial';
+            this.ctx.fillText('[CROP] ' + this.cropRoi.name, rect.x, rect.y - 5);
+
+            // Draw handles if selected
+            if (isSelected) {
+                this.drawHandles(rect);
+            }
+            this.ctx.restore();
+        }
     }
 
     drawHandles(rect) {
@@ -286,7 +377,7 @@ class ROIHandler {
         const x2 = this.currentPos.x;
         const y2 = this.currentPos.y;
 
-        this.ctx.strokeStyle = '#ffffff';
+        this.ctx.strokeStyle = this.mode === 'CROP' ? '#3498db' : '#ffffff';
         this.ctx.setLineDash([5, 5]);
         this.ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
         this.ctx.setLineDash([]);

@@ -1,0 +1,39 @@
+# config/default_game_template.yaml
+game_name: "{game_name}"
+
+detection:
+  # 检测区域（待配置）
+  killfeed_roi: [0.0, 0.0, 1.0, 1.0]
+  
+  # OCR文字识别配置
+  ocr:
+    enabled: true
+    keywords: []  # 待配置，如 ["击杀", "KILL"]
+    similarity_threshold: 0.8
+    required: false
+  
+  # 模板匹配配置
+  templates: {}  # 待配置
+  template_dir: "models/templates/{game_name}"
+  
+  # 颜色检测配置
+  colors: {}  # 待配置
+  
+  # 信号权重
+  weights:
+    ocr: 0.4
+    template: 0.3
+    color: 0.2
+    yolo: 0.1
+  
+  # 预筛选
+  prefilter:
+    enabled: true
+    color_threshold: 0.01
+  
+  # 置信度阈值
+  confidence_threshold: 0.5
+
+highlights:
+  pre_kill_time: 5.0
+  post_kill_time: 2.0

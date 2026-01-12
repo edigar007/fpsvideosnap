@@ -28,6 +28,14 @@ def create_app():
     
     # Register blueprints
     app.register_blueprint(api_bp, url_prefix="/api")
+
+    # Initialize OCR Service (lazy load trigger)
+    def init_ocr():
+        logger.info("Pre-loading OCR models...")
+        from src.tools.config_assistant.ocr_service import ocr_service
+        logger.info("OCR models loaded.")
+    
+    threading.Thread(target=init_ocr, daemon=True).start()
     
     # Route to serve uploads
     @app.route('/uploads/<filename>')
@@ -66,8 +74,10 @@ def _cleanup_uploads(upload_folder: str):
 
 def run_server(port=8080, debug=False):
     """Start the Config Assistant server and open the browser."""
+    # Ensure cleanup before starting
     app = create_app()
     upload_folder = app.config.get('UPLOAD_FOLDER')
+    _cleanup_uploads(upload_folder)
 
     try:
         chosen_port = _find_available_port(port)
@@ -78,14 +88,16 @@ def run_server(port=8080, debug=False):
     url = f"http://127.0.0.1:{chosen_port}"
 
     def open_browser():
+        # Wait a bit for the server to start
         time.sleep(1.5)
         logger.info(f"Opening browser at {url}")
         webbrowser.open(url)
 
+    # Launch browser in a separate thread
     threading.Thread(target=open_browser, daemon=True).start()
 
     logger.info(f"Starting Config Assistant Server on {url}")
-    logger.info("Press [bold red]Ctrl+C[/bold red] to stop the server")
+    logger.info("Press [bold red]Ctrl+C[/bold red] to stop the server (Uploads will be cleaned up)")
 
     try:
         app.run(host="127.0.0.1", port=chosen_port, debug=debug, use_reloader=False)
@@ -94,7 +106,9 @@ def run_server(port=8080, debug=False):
     except Exception as e:
         logger.error(f"Server error: {e}")
     finally:
+        logger.info("Cleaning up temporary uploads...")
         _cleanup_uploads(upload_folder)
+        logger.info("Exit successful.")
 
 if __name__ == "__main__":
     setup_logger(debug=True)
