@@ -14,9 +14,18 @@ def main():
     
     # 2. Setup Logging
     logger = setup_logger(debug=args.debug)
-    logger.info("[bold blue]Starting FPS Video Snap...[/bold blue]")
     
-    # 3. Load Configuration
+    # 3. Dispatch by Command
+    if args.command == "config-assistant":
+        from src.tools.config_assistant.server import run_server
+        logger.info("[bold blue]Launching Config Assistant...[/bold blue]")
+        run_server(port=args.port, debug=args.debug)
+        return
+
+    # Default 'run' behavior
+    logger.info("[bold blue]Starting FPS Video Snap Highlights Generator...[/bold blue]")
+    
+    # 4. Load Configuration
     try:
         config = get_config(game_name=args.game, override_path=args.config)
         logger.info(f"Loaded config for game: [yellow]{args.game}[/yellow]")

@@ -10,3 +10,5 @@ tqdm>=4.67.1
 rich>=14.2.0
 pytest>=9.0.2
 psutil>=7.2.1
+flask>=3.0.0
+Pillow>=10.0.0

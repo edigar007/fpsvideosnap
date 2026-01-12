@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FPS Video Snap - Config Assistant</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body class="dark-theme">
+    <div class="app-container">
+        <!-- Sidebar (Left) -->
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="fas fa-crosshairs"></i>
+                <span>Config Assistant</span>
+            </div>
+            
+            <div class="tool-section">
+                <h3>游戏选择</h3>
+                <select id="game-selector" class="game-dropdown">
+                    <option value="">选择游戏...</option>
+                </select>
+            </div>
+
+            <div class="tool-section">
+                <h3>工具栏</h3>
+                <div class="toolbar-buttons">
+                    <button id="tool-roi" class="tool-btn active" title="ROI 区域选择">
+                        <i class="fas fa-vector-square"></i> ROI
+                    </button>
+                    <button id="tool-color" class="tool-btn" title="颜色拾取">
+                        <i class="fas fa-eye-dropper"></i> 颜色
+                    </button>
+                </div>
+            </div>
+
+            <div id="color-picker-details" class="tool-section color-details-panel" style="display: none;">
+                <div class="section-header">
+                    <h3>颜色详情</h3>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="toggle-highlight" checked>
+                        <span class="slider round"></span>
+                        <span class="label-text">实时预览</span>
+                    </label>
+                </div>
+                <div class="color-preview-container">
+                    <div class="color-preview-box"></div>
+                    <div class="color-values">
+                        <div class="rgb-value code">RGB: -</div>
+                        <div class="hsv-value code">HSV: -</div>
+                    </div>
+                </div>
+                
+                <div class="config-group">
+                    <label>容差 (Tolerance)</label>
+                    <div class="slider-with-value">
+                        <input type="range" id="color-tolerance" min="0" max="50" value="20">
+                        <span class="tolerance-value">20</span>
+                    </div>
+                    <div class="hsv-bounds">
+                        <div class="hsv-lower code">Lower: -</div>
+                        <div class="hsv-upper code">Upper: -</div>
+                    </div>
+                </div>
+
+                <div class="config-group">
+                    <label>名称</label>
+                    <input type="text" id="color-name-input" placeholder="例如: enemy_kill_red" class="text-input">
+                </div>
+
+                <div class="panel-actions">
+                    <button id="save-color-btn" class="primary-btn small">保存颜色</button>
+                    <button id="cancel-color-btn" class="text-btn">取消</button>
+                </div>
+            </div>
+
+            <div class="tool-section">
+                <div class="section-header">
+                    <h3>模板管理</h3>
+                </div>
+                <div class="config-group">
+                    <label>游戏名称</label>
+                    <input type="text" id="game-name-input" placeholder="例如: battlefield6" class="text-input">
+                </div>
+                <div class="config-group">
+                    <label>模板名称</label>
+                    <input type="text" id="template-name-input" placeholder="例如: kill_icon" class="text-input">
+                </div>
+                <div class="panel-actions">
+                    <button id="save-template-btn" class="secondary-btn small full-width">
+                        <i class="fas fa-save"></i> 保存模板图片
+                    </button>
+                </div>
+            </div>
+
+            <div class="status-footer">
+                <div id="status-message">就绪</div>
+            </div>
+        </aside>
+
+        <!-- Main Canvas Area (Center) -->
+        <main class="canvas-area">
+            <div id="drop-zone" class="drop-zone">
+                <div class="drop-zone-content">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <p>拖拽视频帧或点击上传</p>
+                    <input type="file" id="file-input" accept="image/*" hidden>
+                </div>
+            </div>
+            <div class="canvas-container" id="canvas-container" style="display: none;">
+                <canvas id="main-canvas"></canvas>
+            </div>
+            <div id="loading-overlay" class="loading-overlay" style="display: none;">
+                <div class="spinner"></div>
+                <p>正在处理...</p>
+            </div>
+        </main>
+
+        <!-- Info/Config Panel (Right) -->
+        <section class="info-panel">
+            <div class="panel-section">
+                <h3>当前配置</h3>
+                <div id="current-game-info" class="info-item">
+                    <span class="label">项目:</span>
+                    <span id="display-game-name">-</span>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-header">
+                    <h3>ROI 列表</h3>
+                    <button id="clear-roi" class="text-btn">清空</button>
+                </div>
+                <div id="roi-list" class="data-list">
+                    <!-- ROI items will dynamicly appear here -->
+                    <div class="empty-msg">暂无 ROI</div>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <div class="section-header">
+                    <h3>颜色列表</h3>
+                    <button id="clear-colors" class="text-btn">清空</button>
+                </div>
+                <div id="color-list" class="data-list">
+                    <!-- Color items will dynamicly appear here -->
+                    <div class="empty-msg">暂无颜色</div>
+                </div>
+            </div>
+
+            <div class="panel-section flex-grow">
+                <div class="section-header">
+                    <h3>YAML 预览</h3>
+                    <button id="copy-yaml" class="text-btn">复制</button>
+                </div>
+                <pre id="yaml-preview" class="code-block"><code># 待生成的配置...</code></pre>
+            </div>
+
+            <div class="action-bar">
+                <button id="download-config" class="secondary-btn">
+                    <i class="fas fa-download"></i> 下载 YAML
+                </button>
+                <button id="save-config" class="primary-btn">保存配置</button>
+            </div>
+        </section>
+    </div>
+
+    <script src="/static/js/canvas.js"></script>
+    <script src="/static/js/history.js"></script>
+    <script src="/static/js/roi.js"></script>
+    <script src="/static/js/colorpicker.js"></script>
+    <script src="/static/js/template.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

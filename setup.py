@@ -15,7 +15,9 @@ setup(
         "ffmpeg-python",
         "tqdm",
         "rich",
-        "psutil"
+        "psutil",
+        "flask",
+        "Pillow"
     ],
     entry_points={
         "console_scripts": [
