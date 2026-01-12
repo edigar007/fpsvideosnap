@@ -35,5 +35,21 @@ class TestConfigLoader(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             self.loader.load_config(game_name="non_existent_game")
 
+    def test_validation(self):
+        # Valid config
+        config = self.loader.load_config()
+        self.loader._validate_config(config) # Should not raise
+        
+        # Invalid OCR enabled type
+        config['detection']['ocr']['enabled'] = "yes"
+        with self.assertRaises(ValueError):
+            self.loader._validate_config(config)
+            
+        # Invalid similarity threshold
+        config['detection']['ocr']['enabled'] = True
+        config['detection']['ocr']['similarity_threshold'] = 1.5
+        with self.assertRaises(ValueError):
+            self.loader._validate_config(config)
+
 if __name__ == '__main__':
     unittest.main()

@@ -11,8 +11,12 @@
 
 ## ✨ 核心特性
 
-- **AI 智能识别**: 采用 YOLOv8-nano 模型结合 OpenCV 混合识别，精准捕捉击杀瞬间。
-- **高性能处理**: 深度优化 NVIDIA GPU 加速（如 4070 Ti Super），支持批量帧推理。
+- **AI 智能识别 (Enhanced Detection System)**: 采用 **多信号融合 (Multi-signal Fusion)** 架构，整合 OCR (PaddleOCR)、模板匹配 (OpenCV) 和 YOLOv8-nano 模型。
+- **高性能处理**: 深度优化 NVIDIA GPU 加速（如 4070 Ti Super），支持批量帧推理与分阶段流水线。
+- **分阶段检测**:
+  - **Prefilter**: 基于颜色统计的高效预过滤，极大地降低计算消耗。
+  - **Precise Detect**: 融合文字识别、图像特征、YOLO 对象检测多维度验证。
+- **可视化调试**: 提供 `--debug-visual` 标志，实时保存检测 ROI、识别文本、模板匹配热图等调试信息。
 - **自动剪辑**: 根据识别的时间点自动提取前置录像、击杀瞬间及后续反馈。
 - **连杀检测**: 自动识别并合并连续击杀（双杀、三连杀等）片段。
 - **精美输出**: 自动随机应用多种转场效果（淡入淡出、闪白等）并混缩背景音乐。
@@ -39,9 +43,9 @@
 .venv\Scripts\python.exe main.py --video path/to/gameplay.mp4 --game battlefield6
 ```
 
-开启调试模式并指定输出目录：
+开启调试模式与可视化：
 ```bash
-.venv\Scripts\python.exe main.py --video sample.mp4 --output ./my_highlights --debug
+.venv\Scripts\python.exe main.py --video sample.mp4 --game battlefield6 --debug --debug-visual
 ```
 
 ## 📂 项目结构

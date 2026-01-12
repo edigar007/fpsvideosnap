@@ -40,6 +40,8 @@ def main():
         config['highlights']['music_path'] = args.music
     if args.debug:
         config['global']['debug'] = True
+    if hasattr(args, 'debug_visual') and args.debug_visual:
+        config['global']['debug_visual'] = True
         
     logger.debug(f"Final Configuration: {config}")
     

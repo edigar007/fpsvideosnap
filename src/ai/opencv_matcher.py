@@ -15,10 +15,12 @@ class OpenCVMatcher:
     def __init__(self, config=None):
         self.config = config or {}
         self.templates = {}
+        self.templates_gray = {}
         
     def load_templates(self, template_dir: str):
         """
         Loads all .png or .jpg templates from a directory.
+        Caches both original and grayscale versions.
         """
         if not os.path.exists(template_dir):
             logger.warning(f"Template directory {template_dir} does not exist.")
@@ -30,68 +32,184 @@ class OpenCVMatcher:
                 template = cv2.imread(path, cv2.IMREAD_UNCHANGED)
                 if template is not None:
                     name = os.path.splitext(filename)[0]
+                    
+                    # Store original for compatibility
                     self.templates[name] = template
+                    
+                    # Pre-convert to gray for performance
+                    if len(template.shape) == 3 and template.shape[2] == 4:
+                        gray = cv2.cvtColor(template, cv2.COLOR_BGRA2GRAY)
+                    elif len(template.shape) == 3:
+                        gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+                    else:
+                        gray = template
+                    self.templates_gray[name] = gray
+                    
                     logger.debug(f"Loaded template: {name}")
 
-    def match_template(self, frame: np.ndarray, template_name: str, threshold=0.8, roi=None):
-        """
-        Performs template matching on a frame or ROI.
-        Returns (location, confidence_score) tuple.
-        """
-        if template_name not in self.templates:
-            return None, 0
-
-        template = self.templates[template_name]
+    def _get_search_area(self, frame: np.ndarray, roi=None):
+        """Helper to crop and grayscale search area."""
+        h_f, w_f = frame.shape[:2]
+        offset_x, offset_y = 0, 0
         search_area = frame
         
         if roi:
-            # roi format: [x, y, w, h] as decimals (0-1)
-            h, w = frame.shape[:2]
-            tx, ty, tw, th = int(roi[0]*w), int(roi[1]*h), int(roi[2]*w), int(roi[3]*h)
+            tx, ty, tw, th = int(roi[0]*w_f), int(roi[1]*h_f), int(roi[2]*w_f), int(roi[3]*h_f)
             search_area = frame[ty:ty+th, tx:tx+tw]
-
-        # Convert to grayscale if template is grayscale or frame is color
-        if len(template.shape) == 3 and template.shape[2] == 4: # Handle Alpha
-            template_gray = cv2.cvtColor(template, cv2.COLOR_BGRA2GRAY)
-        elif len(template.shape) == 3:
-            template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-        else:
-            template_gray = template
+            offset_x, offset_y = tx, ty
 
         if len(search_area.shape) == 3:
             search_gray = cv2.cvtColor(search_area, cv2.COLOR_BGR2GRAY)
         else:
             search_gray = search_area
+            
+        return search_gray, (offset_x, offset_y)
 
-        if template_gray.shape[0] > search_gray.shape[0] or template_gray.shape[1] > search_gray.shape[1]:
-            logger.warning(f"Template {template_name} is larger than search area.")
+    def match_template(self, frame: np.ndarray, template_name: str, threshold=0.8, roi=None, scales=None):
+        """
+        Performs template matching on a frame or ROI.
+        Supports multi-scale matching if scales list is provided.
+        Returns (location, confidence_score) tuple.
+        """
+        if template_name not in self.templates:
             return None, 0
 
-        res = cv2.matchTemplate(search_gray, template_gray, cv2.TM_CCOEFF_NORMED)
-        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-
-        if max_val >= threshold:
-            # Adjust location back to full frame if ROI was used
-            if roi:
-                h_f, w_f = frame.shape[:2]
-                tx, ty = int(roi[0]*w_f), int(roi[1]*h_f)
-                return (max_loc[0] + tx, max_loc[1] + ty), max_val
-            return max_loc, max_val
+        search_gray, (offset_x, offset_y) = self._get_search_area(frame, roi)
+        template_gray = self.templates_gray.get(template_name)
         
-        return None, max_val
+        if template_gray is None:
+            # Fallback if somehow missing from gray cache
+            template = self.templates[template_name]
+            if len(template.shape) == 3 and template.shape[2] == 4:
+                template_gray = cv2.cvtColor(template, cv2.COLOR_BGRA2GRAY)
+            elif len(template.shape) == 3:
+                template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+            else:
+                template_gray = template
+
+        best_max_val = -1
+        best_max_loc = None
+
+        if scales is None:
+            scales = [1.0]
+
+        for scale in scales:
+            if scale == 1.0:
+                resized = template_gray
+            else:
+                w = int(template_gray.shape[1] * scale)
+                h = int(template_gray.shape[0] * scale)
+                if w <= 0 or h <= 0: continue
+                resized = cv2.resize(template_gray, (w, h))
+
+            if resized.shape[0] > search_gray.shape[0] or resized.shape[1] > search_gray.shape[1]:
+                continue
+
+            res = cv2.matchTemplate(search_gray, resized, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(res)
+
+            if max_val > best_max_val:
+                best_max_val = max_val
+                best_max_loc = max_loc
+
+        if best_max_val >= threshold:
+            return (best_max_loc[0] + offset_x, best_max_loc[1] + offset_y), best_max_val
+        
+        return None, best_max_val
     
-    def match_all_templates(self, frame: np.ndarray, threshold=0.8, roi=None):
+    def match_any_template(self, frame: np.ndarray, template_names: list, threshold=0.8, roi=None, scales=None):
+        """
+        Matches multiple templates and returns the one with the highest score.
+        Optimized to prepare search area once.
+        Returns dict: {'name': str, 'location': tuple, 'score': float}
+        """
+        search_gray, (offset_x, offset_y) = self._get_search_area(frame, roi)
+        
+        best_result = {'name': None, 'location': None, 'score': 0.0}
+
+        if scales is None:
+            scales = [1.0]
+
+        for name in template_names:
+            if name not in self.templates:
+                continue
+            
+            template_gray = self.templates_gray.get(name)
+            if template_gray is None: continue # Should not happen
+
+            current_best_score = -1
+            current_best_loc = None
+
+            for scale in scales:
+                if scale == 1.0:
+                    resized = template_gray
+                else:
+                    w = int(template_gray.shape[1] * scale)
+                    h = int(template_gray.shape[0] * scale)
+                    if w <= 0 or h <= 0: continue
+                    resized = cv2.resize(template_gray, (w, h))
+
+                if resized.shape[0] > search_gray.shape[0] or resized.shape[1] > search_gray.shape[1]:
+                    continue
+
+                res = cv2.matchTemplate(search_gray, resized, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(res)
+
+                if max_val > current_best_score:
+                    current_best_score = max_val
+                    current_best_loc = max_loc
+
+            if current_best_score > best_result['score']:
+                best_result['score'] = current_best_score
+                best_result['name'] = name
+                best_result['location'] = (current_best_loc[0] + offset_x, current_best_loc[1] + offset_y) if current_best_loc else None
+
+        if best_result['score'] < threshold:
+            best_result['location'] = None
+
+        return best_result
+
+    def match_all_templates(self, frame: np.ndarray, threshold=0.8, roi=None, scales=None):
         """
         Matches all loaded templates against the frame.
+        Optimized to prepare search area once.
         Returns dict of {template_name: (location, score)} for matches above threshold.
-        Used for incorporating template scores into detection weights.
         """
+        search_gray, (offset_x, offset_y) = self._get_search_area(frame, roi)
         matches = {}
-        for template_name in self.templates.keys():
-            loc, score = self.match_template(frame, template_name, threshold, roi)
-            if loc is not None:
-                matches[template_name] = (loc, score)
-                logger.debug(f"Template {template_name} matched with score {score:.3f}")
+
+        if scales is None:
+            scales = [1.0]
+
+        for name in self.templates.keys():
+            template_gray = self.templates_gray[name]
+            best_score = -1
+            best_loc = None
+
+            for scale in scales:
+                if scale == 1.0:
+                    resized = template_gray
+                else:
+                    w = int(template_gray.shape[1] * scale)
+                    h = int(template_gray.shape[0] * scale)
+                    if w <= 0 or h <= 0: continue
+                    resized = cv2.resize(template_gray, (w, h))
+
+                if resized.shape[0] > search_gray.shape[0] or resized.shape[1] > search_gray.shape[1]:
+                    continue
+
+                res = cv2.matchTemplate(search_gray, resized, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(res)
+
+                if max_val > best_score:
+                    best_score = max_val
+                    best_loc = max_loc
+
+            if best_score >= threshold:
+                loc = (best_loc[0] + offset_x, best_loc[1] + offset_y)
+                matches[name] = (loc, best_score)
+                logger.debug(f"Template {name} matched with score {best_score:.3f}")
+
         return matches
 
     def detect_color(self, frame: np.ndarray, lower_hsv: list, upper_hsv: list, roi=None):

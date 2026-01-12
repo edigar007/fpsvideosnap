@@ -43,7 +43,13 @@ def parse_args():
     run_parser.add_argument(
         "--debug", 
         action="store_true", 
-        help="Enable debug logging and visualization"
+        help="Enable debug logging"
+    )
+    
+    run_parser.add_argument(
+        "--debug-visual", 
+        action="store_true", 
+        help="Generate a debug video with detection overlays"
     )
 
     # Command: config-assistant

@@ -21,6 +21,7 @@ from src.video.video_joiner import VideoJoiner
 from src.audio.audio_mixer import AudioMixer
 from src.report.report_generator import ReportGenerator
 from src.history.history_manager import HistoryManager
+from src.debug.detection_debugger import DetectionDebugger
 
 logger = get_logger(__name__)
 
@@ -248,6 +249,33 @@ class Pipeline:
                 self.results["events"] = detected_events
                 self.results["detection_json"] = detection_json_path
                 self._update_stage("detection", StageStatus.SUCCESS)
+
+                # --- Visual Debug Logic (Phase 5) ---
+                if self.config.get("global", {}).get("debug_visual", False):
+                    debug_viz_dir = os.path.join(self.temp_dir, "debug_viz")
+                    os.makedirs(debug_viz_dir, exist_ok=True)
+                    debugger = DetectionDebugger(self.config)
+                    
+                    # 1. Save frame-by-frame evidence for detected kills
+                    for i, event in enumerate(detected_events):
+                        ts = event.get("timestamp_ms", 0)
+                        # We need the frame to save it. For now, we search frames by timestamp.
+                        # This is a bit inefficient to reload, but keeps memory usage low.
+                        for f_path in frames:
+                            if f"_{ts}." in f_path:
+                                frame = cv2.imread(f_path)
+                                if frame is not None:
+                                    debug_path = os.path.join(debug_viz_dir, f"kill_{ts}_debug.jpg")
+                                    debugger.save_debug_frame(frame, event, debug_path)
+                                break
+                    
+                    # 2. Generate full debug overlay video (Optional but requested)
+                    debug_video_path = os.path.join(debug_viz_dir, "detection_debug.mp4")
+                    debugger.generate_debug_overlay(video_path, detected_events, debug_video_path)
+                    self.results["debug_video"] = debug_video_path
+                    logger.info(f"Visual debug evidence saved to {debug_viz_dir}")
+                # -----------------------------------
+                
             else:
                 detected_events = self.results.get("events", [])
 

@@ -32,6 +32,34 @@ detection:
   # Optional directory containing template images for UI element detection (e.g., killfeed icons)
   template_dir: ""
 
+  # OCR Detection settings
+  ocr:
+    enabled: false
+    keywords: ["击杀", "KILL"]
+    similarity_threshold: 0.8
+    lang: "ch" # 'ch' for Chinese, 'en' for English
+    use_gpu: true
+
+  # Template matching settings
+  templates:
+    skull_icon:
+      path: "skull.png"
+      threshold: 0.7
+    kill_icon:
+      path: "kill.png"
+      threshold: 0.7
+
+  # Multi-signal weights
+  weights:
+    ocr: 0.4
+    template: 0.3
+    color: 0.2
+    yolo: 0.1
+
+  # Fast pre-filtering settings
+  prefilter:
+    color_threshold: 0.01 # Percentage of pixels matching color to trigger deep detection
+
 # Highilght generation settings
 highlights:
   pre_kill_time: 3.0 # Seconds before kill

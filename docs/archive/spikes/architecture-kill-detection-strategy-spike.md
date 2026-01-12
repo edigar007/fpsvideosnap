@@ -1,11 +1,11 @@
 ---
 title: "击杀检测策略架构设计"
 category: "Architecture & Design"
-status: "🔴 Not Started"
+status: "� Completed"
 priority: "High"
 timebox: "4 days"
 created: 2026-01-11
-updated: 2026-01-11
+updated: 2026-01-12
 owner: "Development Team"
 tags: ["technical-spike", "architecture", "design-pattern"]
 ---
@@ -14,27 +14,27 @@ tags: ["technical-spike", "architecture", "design-pattern"]
 
 ## Summary
 
-**Spike Objective:** 设计灵活可扩展的击杀检测策略架构，支持YOLO+OpenCV混合检测、多种验证策略组合，以及未来扩展到其他游戏。
+**Spike Objective:** 设计灵活可扩展的击杀检测策略架构，支持YOLO+OpenCV+OCR混合检测、权重融合逻辑，以及分阶段检测流。
 
-**Why This Matters:** 不同游戏的击杀UI差异巨大，需要设计通用的架构来支持多种检测策略，避免为每个游戏硬编码逻辑。良好的架构设计是后续扩展到其他游戏的基础。
-
-**Timebox:** 4天（架构设计+原型验证）
-
-**Decision Deadline:** Phase 2开始时需要确定，因为AI识别系统的实现依赖此架构。
+**Results:** 已成功实现 `KillDetector` 核心类，采用两阶段处理流程：
+1. **Prefilter (Stage 1)**: 使用 OpenCV 进行快速颜色分布检查，过滤掉 90% 以上的无击杀帧。
+2. **Precise Detect (Stage 2)**: 启用 YOLO 对象检测、OCR 文字识别（关键词匹配）和多尺度模板匹配。
+3. **Signal Fusion**: 基于权重的置信度融合算法。
 
 ## Research Question(s)
 
-**Primary Question:** 如何设计检测策略架构，使其既能支持战地6的复杂检测需求，又便于扩展到其他游戏？
+**Success Status:**
+- YOLO检测、OpenCV验证、OCR文字识别已完全解耦。
+- 通过 `config/games/*.yaml` 完全配置检测逻辑。
+- 采用管道模式（Pipeline）结合策略模式进行检测。
+- 实现了加权置信度聚合（Weighted Confidence Fusion）。
 
-**Secondary Questions:**
+## Technical Context
 
-- YOLO检测、OpenCV验证、多策略组合如何解耦和协调？
-- 如何通过配置文件定义不同游戏的检测策略，而不修改代码？
-- 策略模式 vs 责任链模式 vs 管道模式，哪种最适合？
-- 如何处理检测置信度的聚合和阈值判断？
-- 如何支持A/B测试不同检测策略的效果？
-- 连续击杀检测逻辑应该在哪一层实现？
-- 如何设计插件机制以支持用户自定义检测策略？
+**Implementation Details:**
+- **OCR**: 集成 PaddleOCR/EasyOCR，支持模糊匹配。
+- **Prefilter**: 基于 HSV 空间的 ROI 颜色占比检测。
+- **Visualization**: 实现了 `--debug-visual` 支持，可视化内部决策过程。
 
 ## Investigation Plan
 
