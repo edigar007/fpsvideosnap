@@ -79,8 +79,11 @@ class ReportGenerator:
             lines.append("| Clip # | Start Time | End Time | Kill Count | Type |")
             lines.append("|---|---|---|---|---|")
             for i, clip in enumerate(clips, 1):
-                start = self._format_ms(clip.get("start_ms", 0))
-                end = self._format_ms(clip.get("end_ms", 0))
+                # TASK-008: Consume 'start_ms'/'end_ms' from clip metadata (not 'start'/'end' in seconds)
+                start_ms = clip.get("start_ms", 0)
+                end_ms = clip.get("end_ms", 0)
+                start = self._format_ms(start_ms)
+                end = self._format_ms(end_ms)
                 k_count = clip.get("kill_count", 0)
                 k_type = clip.get("kill_type", "single_kill").replace('_', ' ').title()
                 lines.append(f"| {i} | {start} | {end} | {k_count} | {k_type} |")

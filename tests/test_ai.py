@@ -120,3 +120,198 @@ def test_timestamp_recorder(tmp_path):
         assert len(data) == 2
         assert data[0]["timestamp_ms"] == 1000
         assert data[1]["meta"]["player"] == "enemy1"
+
+# ==================== PHASE 2 REGRESSION TESTS (TASK-006) ====================
+
+def test_opencv_template_loading(tmp_path):
+    """TASK-006: Verify template loading works correctly."""
+    # Create test template directory
+    template_dir = tmp_path / "templates"
+    template_dir.mkdir()
+    
+    # Create sample templates
+    template1 = np.ones((20, 20, 3), dtype=np.uint8) * 100
+    template2 = np.ones((30, 30, 3), dtype=np.uint8) * 200
+    
+    cv2.imwrite(str(template_dir / "skull.png"), template1)
+    cv2.imwrite(str(template_dir / "crosshair.png"), template2)
+    cv2.imwrite(str(template_dir / "notimage.txt"), b"text")  # Should be ignored
+    
+    # Load templates
+    matcher = OpenCVMatcher()
+    matcher.load_templates(str(template_dir))
+    
+    # Verify correct number of templates loaded
+    assert len(matcher.templates) == 2
+    assert "skull" in matcher.templates
+    assert "crosshair" in matcher.templates
+    assert matcher.templates["skull"].shape == (20, 20, 3)
+    assert matcher.templates["crosshair"].shape == (30, 30, 3)
+
+def test_opencv_template_loading_missing_dir():
+    """TASK-006: Verify graceful handling of missing template directory."""
+    matcher = OpenCVMatcher()
+    # Should not crash, just log warning
+    matcher.load_templates("/nonexistent/path")
+    assert len(matcher.templates) == 0
+
+def test_opencv_match_all_templates(tmp_path):
+    """TASK-006: Verify match_all_templates method works correctly."""
+    # Create a test frame with a distinct pattern
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame[30:50, 30:50] = (255, 255, 255)  # White square
+    
+    # Create template directory
+    template_dir = tmp_path / "templates"
+    template_dir.mkdir()
+    
+    # Create matching template
+    template = frame[30:50, 30:50].copy()
+    cv2.imwrite(str(template_dir / "white_square.png"), template)
+    
+    # Load and match
+    matcher = OpenCVMatcher()
+    matcher.load_templates(str(template_dir))
+    matches = matcher.match_all_templates(frame, threshold=0.9)
+    
+    assert len(matches) == 1
+    assert "white_square" in matches
+    loc, score = matches["white_square"]
+    assert score > 0.99
+    # Location should be top-left corner of the match
+    assert loc[0] >= 0 and loc[1] >= 0
+
+def test_detection_weights_with_templates(tmp_path, mock_yolo_model):
+    """TASK-006: Verify detection weights incorporate template scores when templates exist."""
+    # Create frame with both color and template patterns
+    frame = np.zeros((200, 200, 3), dtype=np.uint8)
+    # Blue region for color detection
+    frame[80:120, 80:120] = (255, 0, 0)  # Blue in BGR
+    # White cross pattern for template
+    frame[90:110, 80:120] = (255, 255, 255)
+    frame[80:120, 90:110] = (255, 255, 255)
+    
+    # Create template
+    template_dir = tmp_path / "templates"
+    template_dir.mkdir()
+    template = frame[80:120, 80:120].copy()
+    cv2.imwrite(str(template_dir / "kill_icon.png"), template)
+    
+    # Setup config
+    game_config = {
+        'detection': {
+            'confidence_threshold': 0.3,
+            'killfeed_roi': [0, 0, 1, 1],
+            'colors': {
+                'player_kill_blue': {
+                    'lower': [100, 100, 100],
+                    'upper': [140, 255, 255]
+                }
+            }
+        }
+    }
+    
+    # Test WITHOUT templates
+    yolo = YoloDetector(mock_yolo_model)
+    cv_matcher_no_templates = OpenCVMatcher(game_config)
+    detector_no_templates = KillDetector(yolo, cv_matcher_no_templates, game_config)
+    result_no_templates = detector_no_templates.process_frame(frame)
+    
+    # Test WITH templates
+    cv_matcher_with_templates = OpenCVMatcher(game_config)
+    cv_matcher_with_templates.load_templates(str(template_dir))
+    detector_with_templates = KillDetector(yolo, cv_matcher_with_templates, game_config)
+    result_with_templates = detector_with_templates.process_frame(frame)
+    
+    # Verify template signal is present and improves confidence
+    assert "template" in result_with_templates["signals"]
+    assert result_with_templates["signals"]["template"] > 0.8
+    assert result_with_templates["confidence"] > result_no_templates["confidence"]
+    
+    # Both should detect kill, but with different confidence scores
+    assert result_no_templates["is_kill"] is True
+    assert result_with_templates["is_kill"] is True
+
+def test_timestamp_recorder_multiple_saves(tmp_path):
+    """TASK-006: Verify TimestampRecorder handles multiple save operations correctly."""
+    output_file = tmp_path / "detections.json"
+    recorder = TimestampRecorder(str(output_file))
+    
+    # First batch of events
+    recorder.record_event(1000, "kill", 0.92, {"type": "rifle"})
+    recorder.record_event(2500, "kill", 0.88, {"type": "grenade"})
+    recorder.save()
+    
+    # Verify first save
+    with open(output_file, 'r') as f:
+        data1 = json.load(f)
+        assert len(data1) == 2
+    
+    # Add more events
+    recorder.record_event(5000, "kill", 0.95, {"type": "sniper"})
+    recorder.save()
+    
+    # Verify all events persisted
+    with open(output_file, 'r') as f:
+        data2 = json.load(f)
+        assert len(data2) == 3
+        assert data2[2]["timestamp_ms"] == 5000
+        assert data2[2]["meta"]["type"] == "sniper"
+
+def test_timestamp_recorder_json_structure(tmp_path):
+    """TASK-006: Verify TimestampRecorder saves correct JSON structure."""
+    output_file = tmp_path / "structure_test.json"
+    recorder = TimestampRecorder(str(output_file))
+    
+    recorder.record_event(
+        timestamp_ms=1234,
+        event_type="kill",
+        confidence=0.876,
+        meta={"weapon": "M4A1", "distance": 25.5}
+    )
+    recorder.save()
+    
+    with open(output_file, 'r') as f:
+        data = json.load(f)
+        assert len(data) == 1
+        event = data[0]
+        
+        # Verify required fields
+        assert "timestamp_ms" in event
+        assert "type" in event
+        assert "confidence" in event
+        assert "recorded_at" in event
+        assert "meta" in event
+        
+        # Verify values
+        assert event["timestamp_ms"] == 1234
+        assert event["type"] == "kill"
+        assert event["confidence"] == 0.876
+        assert event["meta"]["weapon"] == "M4A1"
+        assert event["meta"]["distance"] == 25.5
+
+def test_kill_detector_with_empty_templates(mock_yolo_model):
+    """TASK-006: Verify KillDetector handles missing templates gracefully."""
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    
+    game_config = {
+        'detection': {
+            'confidence_threshold': 0.5,
+            'killfeed_roi': [0, 0, 1, 1],
+            'colors': {}
+        }
+    }
+    
+    yolo = YoloDetector(mock_yolo_model)
+    cv_matcher = OpenCVMatcher(game_config)
+    # Don't load any templates
+    detector = KillDetector(yolo, cv_matcher, game_config)
+    
+    result = detector.process_frame(frame)
+    
+    # Should work without crashing
+    assert "confidence" in result
+    assert "signals" in result
+    assert result["signals"]["template"] == 0.0
+
+

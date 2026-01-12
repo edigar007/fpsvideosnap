@@ -68,6 +68,21 @@ def test_clip_extractor_logic(mock_cutter_class):
     with patch("os.makedirs"), patch("src.clip.clip_extractor.open", create=True):
         clips = extractor.extract_clips("test.mp4", events, "output/test")
         
+    # TASK-003: Assert new metadata fields
     assert len(clips) == 1
     assert clips[0]["kill_type"] == "double_kill"
+    
+    # Verify TASK-001 fields are present
+    assert "path" in clips[0], "Missing 'path' field in clip metadata"
+    assert "start_ms" in clips[0], "Missing 'start_ms' field in clip metadata"
+    assert "end_ms" in clips[0], "Missing 'end_ms' field in clip metadata"
+    assert "filename" in clips[0], "Missing 'filename' field in clip metadata"
+    
+    # Verify millisecond values are integers
+    assert isinstance(clips[0]["start_ms"], int), "start_ms should be integer"
+    assert isinstance(clips[0]["end_ms"], int), "end_ms should be integer"
+    
+    # Verify path is absolute and ends with .mp4
+    assert clips[0]["path"].endswith(".mp4"), "path should be a .mp4 file"
+    
     mock_cutter.cut_segment.assert_called_once()

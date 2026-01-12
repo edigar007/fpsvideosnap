@@ -54,6 +54,14 @@ def test_report_generation(temp_dirs):
         assert "Triple Kill: 1" in content
         assert "Detailed Clips List" in content
         assert "test_video.mp4" in content
+        
+        # TASK-008: Verify correct ms rendering from start_ms/end_ms
+        # 1000ms should render as 00:00:01.000
+        # 6000ms should render as 00:00:06.000
+        assert "00:00:01.000" in content  # start_ms: 1000
+        assert "00:00:06.000" in content  # end_ms: 6000
+        assert "00:00:20.000" in content  # start_ms: 20000
+        assert "00:00:30.000" in content  # end_ms: 30000
 
 def test_report_empty_cases(temp_dirs):
     output_dir, _ = temp_dirs
@@ -113,3 +121,16 @@ def test_history_cleanup_by_age(temp_dirs, monkeypatch):
     manager.cleanup()
     
     assert not os.path.exists(old_file)
+
+def test_format_ms_function(temp_dirs):
+    """TASK-008: Test _format_ms function produces correct timestamp strings."""
+    output_dir, _ = temp_dirs
+    generator = ReportGenerator(output_dir)
+    
+    # Test various time conversions
+    assert generator._format_ms(0) == "00:00:00.000"
+    assert generator._format_ms(1000) == "00:00:01.000"
+    assert generator._format_ms(1500) == "00:00:01.500"
+    assert generator._format_ms(60000) == "00:01:00.000"
+    assert generator._format_ms(3661500) == "01:01:01.500"  # 1h 1m 1.5s
+    assert generator._format_ms(125250) == "00:02:05.250"   # 2m 5.25s

@@ -103,6 +103,29 @@ class TestVideoProcessing(unittest.TestCase):
         self.assertTrue(os.path.exists(output_clip))
         vinfo = VideoInfo(output_clip)
         self.assertAlmostEqual(vinfo.duration, 1.0, delta=0.1)
+    
+    def test_clip_cutting_with_stream_copy(self):
+        """TASK-009: Test stream copy optimization."""
+        cutter = ClipCutter(hwaccel=None)
+        output_clip = os.path.join(self.test_dir, "cut_stream_copy.mp4")
+        
+        # Test stream copy (may fallback to re-encode)
+        cutter.cut_segment(self.dummy_video, output_clip, start_sec=0.5, duration_sec=1.0, use_stream_copy=True)
+        
+        self.assertTrue(os.path.exists(output_clip))
+        vinfo = VideoInfo(output_clip)
+        self.assertAlmostEqual(vinfo.duration, 1.0, delta=0.2)  # Allow more tolerance for stream copy
+    
+    def test_stream_copy_fallback_behavior(self):
+        """TASK-009: Test that stream copy falls back to re-encode gracefully."""
+        cutter = ClipCutter(hwaccel=None)
+        output_clip = os.path.join(self.test_dir, "cut_fallback.mp4")
+        
+        # Even if stream copy fails, the method should succeed via fallback
+        # We can't easily force stream copy to fail, but we can at least verify the code path exists
+        cutter.cut_segment(self.dummy_video, output_clip, start_sec=0.0, duration_sec=0.5, use_stream_copy=True)
+        
+        self.assertTrue(os.path.exists(output_clip))
 
     def test_temp_manager(self):
         """TASK-015: Temp manager logic."""

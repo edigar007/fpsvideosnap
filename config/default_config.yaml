@@ -29,6 +29,8 @@ detection:
   time_window: 2.0
   # Default ROI (Region of Interest) for UI elements [x, y, w, h] as percentages (0.0 - 1.0)
   ui_roi: [0.0, 0.0, 1.0, 1.0]
+  # Optional directory containing template images for UI element detection (e.g., killfeed icons)
+  template_dir: ""
 
 # Highilght generation settings
 highlights:

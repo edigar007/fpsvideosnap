@@ -43,9 +43,11 @@ def test_video_joiner_single_clip(mock_run, mock_info):
 @patch("src.video.video_joiner.VideoInfo")
 @patch("subprocess.Popen")
 def test_video_joiner_complex_filter_logic(mock_popen, mock_info):
-    # Mock VideoInfo to return fixed duration
-    mock_instance = mock_info.return_value
-    mock_instance.get_metadata.return_value = {"format": {"duration": "10.0"}}
+    # Mock VideoInfo to return fixed duration via property
+    mock_instance = MagicMock()
+    # TASK-007: Mock the duration property, not get_metadata
+    mock_instance.duration = 10.0
+    mock_info.return_value = mock_instance
     
     config = {
         "video": {
@@ -85,3 +87,75 @@ def test_video_joiner_complex_filter_logic(mock_popen, mock_info):
     # next offset = 19.5 - 0.5 = 19.0
     assert "offset=9.5" in cmd_str
     assert "offset=19.0" in cmd_str
+
+@patch("src.video.video_joiner.VideoInfo")
+def test_video_joiner_duration_reading_via_property(mock_info):
+    """TASK-007: Test that VideoJoiner reads durations via VideoInfo.duration property."""
+    config = {
+        "video": {
+            "ffmpeg_path": "ffmpeg",
+            "encoder": "h264_nvenc",
+            "fps": 60,
+            "bitrate": "20M",
+            "hwaccel": "cuda"
+        },
+        "highlights": {
+            "transition_type": "fade",
+            "transition_duration": 0.5
+        }
+    }
+    
+    # Mock VideoInfo instances with duration property
+    mock_instance1 = MagicMock()
+    mock_instance1.duration = 5.0
+    
+    mock_instance2 = MagicMock()
+    mock_instance2.duration = 7.5
+    
+    mock_info.side_effect = [mock_instance1, mock_instance2]
+    
+    with patch("subprocess.Popen") as mock_popen:
+        mock_process = MagicMock()
+        mock_process.communicate.return_value = (b"", b"")
+        mock_process.returncode = 0
+        mock_popen.return_value = mock_process
+        
+        joiner = VideoJoiner(config)
+        success = joiner.join_clips(["c1.mp4", "c2.mp4"], "out.mp4")
+        
+        assert success
+        # Verify VideoInfo was called for each clip
+        assert mock_info.call_count == 2
+
+@patch("src.video.video_joiner.VideoInfo")
+def test_video_joiner_handles_missing_duration(mock_info):
+    """TASK-007: Test that VideoJoiner guards against missing/invalid duration metadata."""
+    config = {
+        "video": {"ffmpeg_path": "ffmpeg"},
+        "highlights": {"transition_type": "fade", "transition_duration": 0.5}
+    }
+    
+    # Mock VideoInfo to raise exception
+    mock_info.side_effect = RuntimeError("Failed to extract video metadata")
+    
+    joiner = VideoJoiner(config)
+    success = joiner.join_clips(["bad.mp4", "clip2.mp4"], "out.mp4")
+    
+    assert not success  # Should fail gracefully
+
+@patch("src.video.video_joiner.VideoInfo")
+def test_video_joiner_handles_zero_duration(mock_info):
+    """TASK-007: Test that VideoJoiner guards against zero duration."""
+    config = {
+        "video": {"ffmpeg_path": "ffmpeg"},
+        "highlights": {"transition_type": "fade", "transition_duration": 0.5}
+    }
+    
+    mock_instance = MagicMock()
+    mock_instance.duration = 0.0  # Invalid duration
+    mock_info.return_value = mock_instance
+    
+    joiner = VideoJoiner(config)
+    success = joiner.join_clips(["zero.mp4"], "out.mp4")
+    
+    assert not success  # Should fail due to invalid duration

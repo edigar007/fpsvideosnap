@@ -56,9 +56,17 @@ class VideoJoiner:
         """Uses FFmpeg complex filter to join clips with xfade and acrossfade."""
         durations = []
         for path in clip_paths:
-            info = VideoInfo(path)
-            meta = info.get_metadata()
-            durations.append(float(meta['format']['duration']))
+            try:
+                info = VideoInfo(path)
+                # TASK-007: Use VideoInfo.duration property (float seconds)
+                duration = info.duration
+                if duration <= 0:
+                    logger.error(f"Invalid duration {duration} for {path}")
+                    return False
+                durations.append(duration)
+            except Exception as e:
+                logger.error(f"Failed to get duration for {path}: {e}")
+                return False
 
         transition_duration = self.transition_mgr.get_duration()
         

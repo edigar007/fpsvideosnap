@@ -81,7 +81,7 @@ class ClipExtractor:
                 kill_type = clip["kill_type"]
                 timestamp_str = f"{int(start)}s"
                 
-                # TASK-031: Filename convention
+                # TASK-001: Canonical filename with timestamp
                 filename = f"clip_{idx+1:03d}_{kill_type}_{timestamp_str}.mp4"
                 output_path = os.path.join(output_dir, filename)
                 
@@ -89,9 +89,15 @@ class ClipExtractor:
                 
                 try:
                     self.cutter.cut_segment(video_path, output_path, start, duration)
+                    
+                    # TASK-001: Ensure deterministic metadata fields
+                    clip["path"] = output_path
                     clip["filename"] = filename
-                    clip["output_path"] = output_path
+                    clip["output_path"] = output_path  # Backward compatibility
                     clip["id"] = idx + 1
+                    clip["start_ms"] = int(start * 1000)
+                    clip["end_ms"] = int(clip["end"] * 1000)
+                    
                     final_clips.append(clip)
                 except Exception as e:
                     logger.error(f"Failed to extract clip {idx+1}: {str(e)}")
@@ -106,9 +112,27 @@ class ClipExtractor:
         return final_clips
 
     def _save_metadata(self, output_dir: str, clips: List[Dict]):
-        meta_path = os.path.join(output_dir, "clips_metadata.json")
-        # Remove event objects to keep JSON clean if they are too large, 
-        # or keep them if needed. Recording timestamps is essential.
+        # TASK-001: Save as metadata.json with deterministic fields
+        meta_path = os.path.join(output_dir, "metadata.json")
+        
+        # Create clean metadata structure
+        clean_clips = []
+        for clip in clips:
+            clean_clip = {
+                "id": clip.get("id"),
+                "path": clip.get("path"),
+                "filename": clip.get("filename"),
+                "start_ms": clip.get("start_ms"),
+                "end_ms": clip.get("end_ms"),
+                "kill_count": clip.get("kill_count"),
+                "kill_type": clip.get("kill_type"),
+                # Backward compatibility
+                "start": clip.get("start"),
+                "end": clip.get("end"),
+                "output_path": clip.get("output_path")
+            }
+            clean_clips.append(clean_clip)
+        
         with open(meta_path, 'w', encoding='utf-8') as f:
-            json.dump(clips, f, indent=4, ensure_ascii=False)
+            json.dump(clean_clips, f, indent=4, ensure_ascii=False)
         logger.info(f"Saved clip metadata to {meta_path}")

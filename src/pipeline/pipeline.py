@@ -15,6 +15,7 @@ from src.ai.model_manager import ModelManager
 from src.ai.yolo_detector import YoloDetector
 from src.ai.opencv_matcher import OpenCVMatcher
 from src.ai.kill_detector import KillDetector
+from src.ai.timestamp_recorder import TimestampRecorder
 from src.clip.clip_extractor import ClipExtractor
 from src.video.video_joiner import VideoJoiner
 from src.audio.audio_mixer import AudioMixer
@@ -175,8 +176,24 @@ class Pipeline:
                     yolo_model, 
                     batch_size=batch_size
                 )
-                opencv_matcher = OpenCVMatcher()
+                opencv_matcher = OpenCVMatcher(self.config)
+                
+                # TASK-005: Load templates before batch processing
+                template_dir = self.config.get("detection", {}).get("template_dir", "")
+                if template_dir and os.path.exists(template_dir):
+                    opencv_matcher.load_templates(template_dir)
+                    logger.info(f"Loaded {len(opencv_matcher.templates)} templates from {template_dir}")
+                
                 kill_detector = KillDetector(yolo_detector, opencv_matcher, self.config)
+                
+                # TASK-004: Setup TimestampRecorder to persist detection events
+                history_dir = self.config.get("global", {}).get("history_dir", "history")
+                run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                run_dir = os.path.join(history_dir, f"run_{run_timestamp}")
+                os.makedirs(run_dir, exist_ok=True)
+                
+                detection_json_path = os.path.join(run_dir, "detections.json")
+                timestamp_recorder = TimestampRecorder(detection_json_path)
                 
                 detected_events = []
                 import cv2
@@ -207,12 +224,29 @@ class Pipeline:
                     if chunk_frames:
                         batch_events = kill_detector.process_video_batch(chunk_frames, chunk_timestamps)
                         detected_events.extend(batch_events)
+                        
+                        # TASK-004: Stream each event to TimestampRecorder
+                        for event in batch_events:
+                            timestamp_recorder.record_event(
+                                timestamp_ms=event.get("timestamp_ms", 0),
+                                event_type="kill",
+                                confidence=event.get("confidence", 0.0),
+                                meta={
+                                    "signals": event.get("signals", {}),
+                                    "frame_path": event.get("frame_path", "")
+                                }
+                            )
                     
                     pbar.update(len(chunk_paths))
                     
                 pbar.close()
                 
+                # TASK-004: Save detection events to JSON
+                timestamp_recorder.save()
+                logger.info(f"Detection events saved to {detection_json_path}")
+                
                 self.results["events"] = detected_events
+                self.results["detection_json"] = detection_json_path
                 self._update_stage("detection", StageStatus.SUCCESS)
             else:
                 detected_events = self.results.get("events", [])
@@ -228,7 +262,16 @@ class Pipeline:
                 else:
                     self._update_stage("clips", StageStatus.RUNNING)
                     clip_extractor = ClipExtractor(self.config)
-                    extracted_clips = clip_extractor.extract_clips(video_path, detected_events, clip_dir)
+                    
+                    # TASK-004: Extract clips from persisted JSON instead of in-memory events
+                    detection_json = self.results.get("detection_json")
+                    if detection_json and os.path.exists(detection_json):
+                        extracted_clips = clip_extractor.extract_from_json(video_path, detection_json, clip_dir)
+                    else:
+                        # Fallback to in-memory events for backward compatibility
+                        logger.warning("Detection JSON not found, falling back to in-memory events")
+                        extracted_clips = clip_extractor.extract_clips(video_path, detected_events, clip_dir)
+                    
                     self.results["clips"] = extracted_clips
                     self._update_stage("clips", StageStatus.SUCCESS)
             else:
@@ -243,7 +286,22 @@ class Pipeline:
                     self._update_stage("join", StageStatus.RUNNING)
                     joined_video = os.path.join(self.temp_dir, "joined_no_audio.mp4")
                     joiner = VideoJoiner(self.config)
-                    clip_paths = [c["path"] for c in extracted_clips]
+                    
+                    # TASK-002: Validate clip paths and handle missing files
+                    clip_paths = []
+                    for clip in extracted_clips:
+                        # Read 'path' field, fallback to 'output_path' for backward compatibility
+                        clip_path = clip.get("path") or clip.get("output_path")
+                        if not clip_path:
+                            logger.error(f"Clip {clip.get('id', 'unknown')} missing path field")
+                            raise RuntimeError(f"Clip metadata missing path field")
+                        
+                        if not os.path.exists(clip_path):
+                            logger.error(f"Clip file not found: {clip_path}")
+                            raise FileNotFoundError(f"Clip file not found: {clip_path}")
+                        
+                        clip_paths.append(clip_path)
+                    
                     if joiner.join_clips(clip_paths, joined_video):
                         self.results["joined_video"] = joined_video
                         self._update_stage("join", StageStatus.SUCCESS)

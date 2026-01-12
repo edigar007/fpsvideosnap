@@ -17,6 +17,9 @@ detection:
     enemy_kill_red:
       lower: [0, 150, 150]
       upper: [10, 255, 255]
+  
+  # Template directory for BF6 UI elements (killfeed icons, etc.)
+  template_dir: "models/templates/battlefield6"
 
 highlights:
   # BF6 actions are fast-paced, maybe longer pre-kill time

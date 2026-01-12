@@ -36,6 +36,7 @@ class OpenCVMatcher:
     def match_template(self, frame: np.ndarray, template_name: str, threshold=0.8, roi=None):
         """
         Performs template matching on a frame or ROI.
+        Returns (location, confidence_score) tuple.
         """
         if template_name not in self.templates:
             return None, 0
@@ -78,6 +79,20 @@ class OpenCVMatcher:
             return max_loc, max_val
         
         return None, max_val
+    
+    def match_all_templates(self, frame: np.ndarray, threshold=0.8, roi=None):
+        """
+        Matches all loaded templates against the frame.
+        Returns dict of {template_name: (location, score)} for matches above threshold.
+        Used for incorporating template scores into detection weights.
+        """
+        matches = {}
+        for template_name in self.templates.keys():
+            loc, score = self.match_template(frame, template_name, threshold, roi)
+            if loc is not None:
+                matches[template_name] = (loc, score)
+                logger.debug(f"Template {template_name} matched with score {score:.3f}")
+        return matches
 
     def detect_color(self, frame: np.ndarray, lower_hsv: list, upper_hsv: list, roi=None):
         """
