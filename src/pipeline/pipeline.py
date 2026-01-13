@@ -212,7 +212,8 @@ class Pipeline:
                 
                 # Process in large chunks to avoid OOM but utilize batching
                 # Chunk size should be a multiple of batch_size
-                chunk_size = 128 
+                # 优化：增加 chunk_size 以减少批次数量，提高 GPU 利用率
+                chunk_size = 256 
                 
                 for i in range(0, len(frames), chunk_size):
                     chunk_paths = frames[i:i + chunk_size]

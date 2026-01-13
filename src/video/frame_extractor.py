@@ -15,9 +15,8 @@ class FrameExtractor:
         Extracts frames at regular intervals with precise timestamps.
         Naming convention: frame_{timestamp_ms}.jpg
         
-        使用精确的 select 过滤器来确保帧时间戳的准确性。
-        select 表达式: 'eq(n,0)+gte(t-prev_selected_t,{interval_sec})'
-        这会在时间轴上精确选择间隔为 interval_ms 的帧。
+        使用循环的 -ss 参数来确保每帧的时间戳完全准确。
+        这比过滤器方法慢，但可以保证时间戳的绝对精确性，避免累积误差。
         """
         video_path = os.path.abspath(video_path)
         output_dir = os.path.abspath(output_dir)
@@ -25,7 +24,7 @@ class FrameExtractor:
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
 
-        # 首先获取视频信息
+        # 首先获取视频时长
         try:
             probe_cmd = [
                 "ffprobe",
@@ -39,138 +38,81 @@ class FrameExtractor:
             duration_sec = float(probe_result.stdout.strip())
             logger.debug(f"Video duration: {duration_sec:.2f}s")
         except Exception as e:
-            logger.warning(f"Failed to get video duration: {e}")
-            duration_sec = None
+            logger.error(f"Failed to get video duration: {e}")
+            raise RuntimeError("Cannot determine video duration")
         
-        # 使用 select 过滤器配合 setpts 来精确提取帧
-        # select='eq(n,0)+gte(t-prev_selected_t,{interval_sec})' 
-        # 会在第 0 帧和之后每隔 interval_sec 秒选择一帧
         interval_sec = interval_ms / 1000.0
+        total_frames = int(duration_sec / interval_sec) + 1
         
-        # 使用 select 过滤器来精确选择帧
-        select_filter = f"select='eq(n,0)+gte(t-prev_selected_t,{interval_sec})',setpts=N/FRAME_RATE/TB"
+        logger.info(f"Extracting {total_frames} frames from {os.path.basename(video_path)} with interval {interval_ms}ms...")
+        logger.info("Using precise timestamp extraction (may take longer but ensures accuracy)")
         
-        cmd = [self.ffmpeg_path]
+        final_files = []
+        timestamp_ms = 0
+        frame_count = 0
         
-        if self.hwaccel == "cuda":
-            cmd.extend(["-hwaccel", "cuda"])
-            
-        cmd.extend([
-            "-i", video_path,
-            "-vf", select_filter,
-            "-vsync", "vfr",  # 可变帧率，保持精确时间戳
-            "-q:v", "2",  # 高质量
-            os.path.join(output_dir, "frame_%d.jpg")
-        ])
+        # 使用进度条
+        from src.utils.progress import create_progress_bar
+        pbar = create_progress_bar(total=total_frames, desc="Extracting Frames")
         
-        logger.info(f"Extracting frames from {os.path.basename(video_path)} with interval {interval_ms}ms...")
-        logger.debug(f"FFmpeg command: {' '.join(cmd)}")
+        while timestamp_ms < duration_sec * 1000:
+            timestamp_sec = timestamp_ms / 1000.0
+            frame_filename = f"frame_{timestamp_ms}.jpg"
+            frame_path = os.path.join(output_dir, frame_filename)
+            
+            # 使用 -ss 精确定位并提取单帧
+            # -ss 在 -i 之前可以快速定位（关键帧），在 -i 之后可以精确定位
+            # 使用双重 -ss 策略：先快速定位到附近，再精确提取
+            cmd = [self.ffmpeg_path]
+            
+            cmd.extend(["-ss", str(timestamp_sec)])  # 快速定位到附近的关键帧
+            
+            if self.hwaccel == "cuda":
+                cmd.extend(["-hwaccel", "cuda"])
+            
+            cmd.extend([
+                "-i", video_path,
+                "-ss", "0",  # 从定位点开始精确提取第一帧
+                "-frames:v", "1",
+                "-q:v", "2",
+                "-y",  # 覆盖已存在的文件
+                frame_path
+            ])
+            
+            try:
+                subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=10)
+                final_files.append(frame_path)
+                frame_count += 1
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+                logger.warning(f"Failed to extract frame at {timestamp_ms}ms: {e}")
+            
+            timestamp_ms += interval_ms
+            pbar.update(1)
         
-        try:
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-            
-            # 获取提取的帧文件列表
-            extracted_files = sorted(
-                [f for f in os.listdir(output_dir) if f.startswith("frame_") and f.endswith(".jpg")],
-                key=lambda x: int(x.replace("frame_", "").replace(".jpg", ""))  # 按数字排序
-            )
-            
-            final_files = []
-            
-            # 重命名为精确的时间戳
-            # 关键修复：使用严格的时间戳计算，确保与检测时使用的时间戳一致
-            for i, filename in enumerate(extracted_files):
-                # 精确的时间戳计算：第 i 帧对应 i * interval_ms 毫秒
-                timestamp_ms = i * interval_ms
-                new_name = f"frame_{timestamp_ms}.jpg"
-                old_path = os.path.join(output_dir, filename)
-                new_path = os.path.join(output_dir, new_name)
-                
-                # 避免重复重命名
-                if old_path != new_path:
-                    try:
-                        os.rename(old_path, new_path)
-                    except FileExistsError:
-                        # 如果目标文件已存在，先删除
-                        os.remove(new_path)
-                        os.rename(old_path, new_path)
-                
-                final_files.append(new_path)
-            
-            logger.info(f"Extracted {len(final_files)} frames")
-            if len(final_files) > 0:
-                logger.debug(f"Time range: 0ms to {(len(final_files)-1) * interval_ms}ms")
-            
-            return final_files
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"FFmpeg frame extraction failed: {e.stderr}")
-            # 回退到简单的 fps 方法
-            logger.warning("Falling back to simple fps filter method...")
-            return self._extract_frames_simple(video_path, output_dir, interval_ms)
-    
-    def _extract_frames_simple(self, video_path: str, output_dir: str, interval_ms: int) -> List[str]:
-        """简单的 fps 过滤器方法作为回退"""
-        interval_sec = interval_ms / 1000.0
-        target_fps = 1.0 / interval_sec
-        fps_filter = f"fps={target_fps}"
+        pbar.close()
         
-        cmd = [self.ffmpeg_path]
-        
-        if self.hwaccel == "cuda":
-            cmd.extend(["-hwaccel", "cuda"])
-            
-        cmd.extend([
-            "-i", video_path,
-            "-vf", fps_filter,
-            "-vsync", "vfr",
-            "-q:v", "2",
-            os.path.join(output_dir, "frame_%d.jpg")
-        ])
-        
-        try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
-            
-            extracted_files = sorted(
-                [f for f in os.listdir(output_dir) if f.startswith("frame_") and f.endswith(".jpg")],
-                key=lambda x: int(x.replace("frame_", "").replace(".jpg", ""))
-            )
-            
-            final_files = []
-            for i, filename in enumerate(extracted_files):
-                timestamp_ms = i * interval_ms
-                new_name = f"frame_{timestamp_ms}.jpg"
-                old_path = os.path.join(output_dir, filename)
-                new_path = os.path.join(output_dir, new_name)
-                
-                if old_path != new_path:
-                    try:
-                        os.rename(old_path, new_path)
-                    except FileExistsError:
-                        os.remove(new_path)
-                        os.rename(old_path, new_path)
-                
-                final_files.append(new_path)
-            
-            return final_files
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Fallback extraction also failed: {e.stderr}")
-            raise RuntimeError(f"FFmpeg tool failed: {e}")
+        logger.info(f"Successfully extracted {frame_count} frames")
+        logger.debug(f"Time range: 0ms to {timestamp_ms - interval_ms}ms")
+        return final_files
 
     def extract_single_frame(self, video_path: str, timestamp_ms: float, output_path: str):
         """Extracts a single frame at a specific timestamp."""
         ss_time = timestamp_ms / 1000.0
         
         cmd = [self.ffmpeg_path]
+        
+        # 使用双重 -ss 策略确保精确性
+        cmd.extend(["-ss", str(ss_time)])
+        
         if self.hwaccel == "cuda":
             cmd.extend(["-hwaccel", "cuda"])
             
         cmd.extend([
-            "-ss", str(ss_time),
             "-i", video_path,
+            "-ss", "0",
             "-frames:v", "1",
             "-q:v", "2",
+            "-y",
             output_path
         ])
         

@@ -1,5 +1,6 @@
 from typing import List, Dict, Optional
 import numpy as np
+import time
 from src.ai.yolo_detector import YoloDetector
 from src.ai.opencv_matcher import OpenCVMatcher
 from src.ai.ocr_detector import OCRDetector
@@ -52,8 +53,16 @@ class KillDetector:
         """
         Fast color detection to decide if we should run heavy AI models. (TASK-022)
         """
+        passed, _ = self._prefilter_with_result(frame)
+        return passed
+    
+    def _prefilter_with_result(self, frame: np.ndarray) -> tuple:
+        """
+        Fast color detection with result caching support.
+        Returns: (passed: bool, max_color_pct: float)
+        """
         if not self.colors:
-            return True # No colors defined, skip pre-filter
+            return True, 1.0  # No colors defined, skip pre-filter
             
         max_color_pct = 0.0
         for color_name, color_cfg in self.colors.items():
@@ -76,7 +85,7 @@ class KillDetector:
                 )
                 max_color_pct = max(max_color_pct, pct)
                 
-        return max_color_pct >= self.color_threshold
+        return max_color_pct >= self.color_threshold, max_color_pct
 
     def _calculate_confidence(self, signals: Dict) -> float:
         """
@@ -107,9 +116,12 @@ class KillDetector:
             
         return normalized_conf
 
-    def _precise_detect(self, frame: np.ndarray, yolo_conf: Optional[float] = None) -> Dict:
+    def _precise_detect(self, frame: np.ndarray, yolo_conf: Optional[float] = None, cached_color_pct: Optional[float] = None) -> Dict:
         """
         Runs heavy detection signals (OCR, Template, YOLO). (TASK-023)
+        
+        Args:
+            cached_color_pct: 如果提供，则使用缓存的颜色检测结果，避免重复计算
         """
         signals = {}
         detection_cfg = self.config.get('detection', {})
@@ -157,25 +169,31 @@ class KillDetector:
                     max_yolo_conf = max(max_yolo_conf, d['conf'])
         signals['yolo'] = max_yolo_conf
 
-        # 4. Color Signal (Recalculate or reuse for precise scoring)
-        max_color_conf = 0.0
-        for color_name, color_cfg in self.colors.items():
-            # 支持两种配置格式: hsv_lower/hsv_upper 或 lower/upper
-            hsv_lower = color_cfg.get('hsv_lower', color_cfg.get('lower'))
-            hsv_upper = color_cfg.get('hsv_upper', color_cfg.get('upper'))
-            
-            if hsv_lower and hsv_upper:
-                # 应用容差
-                tolerance = color_cfg.get('tolerance', 0)
-                if tolerance > 0:
-                    hsv_lower = [max(0, hsv_lower[0] - tolerance), max(0, hsv_lower[1] - tolerance), max(0, hsv_lower[2] - tolerance)]
-                    hsv_upper = [min(179, hsv_upper[0] + tolerance), min(255, hsv_upper[1] + tolerance), min(255, hsv_upper[2] + tolerance)]
+        # 4. Color Signal (使用缓存结果或重新计算)
+        if cached_color_pct is not None:
+            # 使用缓存的颜色匹配百分比
+            color_score = min(cached_color_pct * 50, 1.0)
+            signals['color'] = color_score
+        else:
+            # 重新计算（用于非批处理情况）
+            max_color_conf = 0.0
+            for color_name, color_cfg in self.colors.items():
+                # 支持两种配置格式: hsv_lower/hsv_upper 或 lower/upper
+                hsv_lower = color_cfg.get('hsv_lower', color_cfg.get('lower'))
+                hsv_upper = color_cfg.get('hsv_upper', color_cfg.get('upper'))
                 
-                match_percent = self.cv.detect_color(frame, hsv_lower, hsv_upper, roi=self.roi)
-                # Boost confidence if color pattern is found
-                color_score = min(match_percent * 50, 1.0) 
-                max_color_conf = max(max_color_conf, color_score)
-        signals['color'] = max_color_conf
+                if hsv_lower and hsv_upper:
+                    # 应用容差
+                    tolerance = color_cfg.get('tolerance', 0)
+                    if tolerance > 0:
+                        hsv_lower = [max(0, hsv_lower[0] - tolerance), max(0, hsv_lower[1] - tolerance), max(0, hsv_lower[2] - tolerance)]
+                        hsv_upper = [min(179, hsv_upper[0] + tolerance), min(255, hsv_upper[1] + tolerance), min(255, hsv_upper[2] + tolerance)]
+                    
+                    match_percent = self.cv.detect_color(frame, hsv_lower, hsv_upper, roi=self.roi)
+                    # Boost confidence if color pattern is found
+                    color_score = min(match_percent * 50, 1.0) 
+                    max_color_conf = max(max_color_conf, color_score)
+            signals['color'] = max_color_conf
 
         return signals
 
@@ -214,24 +232,40 @@ class KillDetector:
     def process_video_batch(self, frames: List[np.ndarray], timestamps_ms: List[int]) -> List[dict]:
         """
         Processes a batch of frames and returns a list of kill events. (TASK-028)
-        Optimized using two-stage flow.
+        Optimized using two-stage flow with color result caching.
         """
         events = []
+        batch_start = time.time()
         
-        # Stage 1: Fast Filter all frames
+        # Stage 1: Fast Filter all frames with color caching
+        prefilter_start = time.time()
         candidate_indices = []
+        color_cache = {}  # 缓存颜色检测结果，避免在 Stage 2 中重复计算
+        
         for i, frame in enumerate(frames):
-            if self._prefilter(frame):
+            passed, max_color_pct = self._prefilter_with_result(frame)
+            if passed:
                 candidate_indices.append(i)
+                color_cache[i] = max_color_pct  # 缓存颜色结果
+        
+        prefilter_time = time.time() - prefilter_start
         
         if not candidate_indices:
+            logger.debug(f"Batch processing: {len(frames)} frames, 0 candidates, prefilter: {prefilter_time:.3f}s")
             return []
 
         # Stage 2: Heavy detection for candidates
+        yolo_start = time.time()
         candidate_frames = [frames[i] for i in candidate_indices]
         
         # YOLO batch inference for candidates
         yolo_batch_results = self.yolo.detect_batch(candidate_frames)
+        yolo_time = time.time() - yolo_start
+        
+        # Stage 3: OCR and Template matching for each candidate
+        precise_start = time.time()
+        ocr_total_time = 0
+        template_total_time = 0
         
         for idx, i in enumerate(candidate_indices):
             frame = frames[i]
@@ -242,8 +276,16 @@ class KillDetector:
                 if d['name'] == 'kill':
                     max_yolo_conf = max(max_yolo_conf, d['conf'])
             
-            # Run other signals (OCR, Template, Color) and combine with batch YOLO
-            signals = self._precise_detect(frame, yolo_conf=max_yolo_conf)
+            # Run other signals (OCR, Template) and combine with batch YOLO
+            # 使用缓存的颜色结果避免重复计算
+            frame_precise_start = time.time()
+            cached_color = color_cache.get(i, 0.0)
+            signals = self._precise_detect(frame, yolo_conf=max_yolo_conf, cached_color_pct=cached_color)
+            frame_precise_time = time.time() - frame_precise_start
+            
+            # 估算 OCR 时间（如果启用）
+            if self.ocr_enabled:
+                ocr_total_time += frame_precise_time * 0.8  # OCR 通常占 80% 的时间
             
             # OCR Required logic
             ocr_cfg = self.config.get('detection', {}).get('ocr', {})
@@ -259,6 +301,16 @@ class KillDetector:
                     "type": "kill",
                     "signals": signals # Added for debugging (TASK-027 style)
                 })
+        
+        precise_time = time.time() - precise_start
+        total_time = time.time() - batch_start
+        
+        # 详细的性能日志
+        logger.debug(
+            f"Batch: {len(frames)} frames, {len(candidate_indices)} candidates, {len(events)} events | "
+            f"Times: prefilter={prefilter_time:.3f}s, yolo={yolo_time:.3f}s, "
+            f"precise={precise_time:.3f}s (ocr~{ocr_total_time:.3f}s), total={total_time:.3f}s"
+        )
                 
         return events
 
