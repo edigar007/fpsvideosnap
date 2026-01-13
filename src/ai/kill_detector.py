@@ -56,12 +56,22 @@ class KillDetector:
             return True # No colors defined, skip pre-filter
             
         max_color_pct = 0.0
-        for color_name, range_hsv in self.colors.items():
-            if 'lower' in range_hsv and 'upper' in range_hsv:
+        for color_name, color_cfg in self.colors.items():
+            # 支持两种配置格式: hsv_lower/hsv_upper 或 lower/upper
+            hsv_lower = color_cfg.get('hsv_lower', color_cfg.get('lower'))
+            hsv_upper = color_cfg.get('hsv_upper', color_cfg.get('upper'))
+            
+            if hsv_lower and hsv_upper:
+                # 应用容差
+                tolerance = color_cfg.get('tolerance', 0)
+                if tolerance > 0:
+                    hsv_lower = [max(0, hsv_lower[0] - tolerance), max(0, hsv_lower[1] - tolerance), max(0, hsv_lower[2] - tolerance)]
+                    hsv_upper = [min(179, hsv_upper[0] + tolerance), min(255, hsv_upper[1] + tolerance), min(255, hsv_upper[2] + tolerance)]
+                
                 pct = self.cv.detect_color(
                     frame, 
-                    range_hsv['lower'], 
-                    range_hsv['upper'], 
+                    hsv_lower, 
+                    hsv_upper, 
                     roi=self.roi
                 )
                 max_color_pct = max(max_color_pct, pct)
@@ -104,12 +114,17 @@ class KillDetector:
         signals = {}
         detection_cfg = self.config.get('detection', {})
 
+        # 将相对 ROI 转换为像素坐标（用于 OCR）
+        h, w = frame.shape[:2]
+        x, y, w_roi, h_roi = self.roi
+        roi_px = [int(x * w), int(y * h), int(w_roi * w), int(h_roi * h)]
+
         # 1. OCR Signal
         ocr_conf = 0.0
         if self.ocr_enabled and self.ocr:
             ocr_cfg = detection_cfg.get('ocr', {})
             keywords = ocr_cfg.get('keywords', ["击杀", "KILL"])
-            res = self.ocr.find_keywords(frame, keywords, roi=self.roi)
+            res = self.ocr.find_keywords(frame, keywords, roi=roi_px)
             if res['found']:
                 # fuzzy match gives 0-100, we want 0-1.0
                 ocr_conf = res['confidence'] / 100.0 if res['confidence'] > 1.0 else res['confidence']
@@ -144,9 +159,19 @@ class KillDetector:
 
         # 4. Color Signal (Recalculate or reuse for precise scoring)
         max_color_conf = 0.0
-        for color_name, range_hsv in self.colors.items():
-            if 'lower' in range_hsv and 'upper' in range_hsv:
-                match_percent = self.cv.detect_color(frame, range_hsv['lower'], range_hsv['upper'], roi=self.roi)
+        for color_name, color_cfg in self.colors.items():
+            # 支持两种配置格式: hsv_lower/hsv_upper 或 lower/upper
+            hsv_lower = color_cfg.get('hsv_lower', color_cfg.get('lower'))
+            hsv_upper = color_cfg.get('hsv_upper', color_cfg.get('upper'))
+            
+            if hsv_lower and hsv_upper:
+                # 应用容差
+                tolerance = color_cfg.get('tolerance', 0)
+                if tolerance > 0:
+                    hsv_lower = [max(0, hsv_lower[0] - tolerance), max(0, hsv_lower[1] - tolerance), max(0, hsv_lower[2] - tolerance)]
+                    hsv_upper = [min(179, hsv_upper[0] + tolerance), min(255, hsv_upper[1] + tolerance), min(255, hsv_upper[2] + tolerance)]
+                
+                match_percent = self.cv.detect_color(frame, hsv_lower, hsv_upper, roi=self.roi)
                 # Boost confidence if color pattern is found
                 color_score = min(match_percent * 50, 1.0) 
                 max_color_conf = max(max_color_conf, color_score)

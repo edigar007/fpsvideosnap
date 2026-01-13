@@ -187,6 +187,15 @@ class Pipeline:
                 
                 kill_detector = KillDetector(yolo_detector, opencv_matcher, self.config)
                 
+                # Debug: Log detection configuration
+                detection_cfg = self.config.get('detection', {})
+                logger.debug(f"KillDetector initialized with:")
+                logger.debug(f"  Confidence threshold: {detection_cfg.get('confidence_threshold', 0.5)}")
+                logger.debug(f"  ROI: {detection_cfg.get('killfeed_roi', [0, 0, 1, 1])}")
+                logger.debug(f"  Colors: {list(detection_cfg.get('colors', {}).keys())}")
+                logger.debug(f"  OCR enabled: {detection_cfg.get('ocr', {}).get('enabled', False)}")
+                logger.debug(f"  Prefilter threshold: {detection_cfg.get('prefilter', {}).get('color_threshold', 0.01)}")
+                
                 # TASK-004: Setup TimestampRecorder to persist detection events
                 history_dir = self.config.get("global", {}).get("history_dir", "history")
                 run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -226,6 +235,12 @@ class Pipeline:
                         batch_events = kill_detector.process_video_batch(chunk_frames, chunk_timestamps)
                         detected_events.extend(batch_events)
                         
+                        # Debug: Log detection results for this batch
+                        if len(batch_events) > 0:
+                            logger.debug(f"Batch {i//chunk_size + 1}: Detected {len(batch_events)} events")
+                            for event in batch_events[:3]:  # Log first 3 events
+                                logger.debug(f"  Event: ts={event.get('timestamp_ms')}ms, conf={event.get('confidence', 0):.3f}")
+                        
                         # TASK-004: Stream each event to TimestampRecorder
                         for event in batch_events:
                             timestamp_recorder.record_event(
@@ -245,6 +260,16 @@ class Pipeline:
                 # TASK-004: Save detection events to JSON
                 timestamp_recorder.save()
                 logger.info(f"Detection events saved to {detection_json_path}")
+                
+                # Debug: Log final detection statistics
+                logger.info(f"[bold]Detection Summary:[/bold]")
+                logger.info(f"  Total frames processed: {len(frames)}")
+                logger.info(f"  Total events detected: {len(detected_events)}")
+                if len(detected_events) > 0:
+                    avg_conf = sum(e.get('confidence', 0) for e in detected_events) / len(detected_events)
+                    logger.info(f"  Average confidence: {avg_conf:.3f}")
+                    logger.info(f"  First event: ts={detected_events[0].get('timestamp_ms')}ms, conf={detected_events[0].get('confidence', 0):.3f}")
+                    logger.info(f"  Last event: ts={detected_events[-1].get('timestamp_ms')}ms, conf={detected_events[-1].get('confidence', 0):.3f}")
                 
                 self.results["events"] = detected_events
                 self.results["detection_json"] = detection_json_path

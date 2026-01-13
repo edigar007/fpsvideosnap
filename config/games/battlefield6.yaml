@@ -39,3 +39,4 @@ detection:
 highlights:
   pre_kill_time: 5.0
   post_kill_time: 1.5
+  music_path: "assets/music/Johan Soderqvist、Patrik Andrén - Battlefield Classic Theme - Mayhem View.mp3"
