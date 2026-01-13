@@ -1,0 +1,28 @@
+game_name: battlefield4
+detection:
+  killfeed_roi:
+  - 0.42423664122137406
+  - 0.6916575890460996
+  - 0.17003816793893123
+  - 0.19083969465648853
+  ocr:
+    enabled: true
+    keywords:
+    - 敵人撃斃
+    similarity_threshold: 0.9
+    required: false
+  templates: {}
+  template_dir: models/templates/battlefield_4
+  colors: {}
+  weights:
+    ocr: 0.4
+    template: 0.3
+    color: 0.2
+    yolo: 0.1
+  prefilter:
+    enabled: true
+    color_threshold: 0.01
+  confidence_threshold: 0.5
+highlights:
+  pre_kill_time: 5.0
+  post_kill_time: 2.0

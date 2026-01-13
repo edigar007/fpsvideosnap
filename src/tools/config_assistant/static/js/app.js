@@ -140,7 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const response = await fetch('/api/game/create', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name })
+                    body: JSON.stringify({ game_name: name })
                 });
                 
                 if (response.ok) {
@@ -148,8 +148,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     gameSelector.value = name;
                     await loadGameConfig(name);
                     addGameModal.classList.remove('active');
+                    newGameNameInput.value = '';  // 清空输入框
                 } else {
-                    alert('创建失败，可能名称已存在');
+                    const errorData = await response.json();
+                    alert(`创建失败: ${errorData.error || '未知错误'}`);
                 }
             } catch (err) {
                 console.error(err);

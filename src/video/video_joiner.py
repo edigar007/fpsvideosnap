@@ -53,7 +53,61 @@ class VideoJoiner:
             return False
 
     def _join_with_ffmpeg(self, clip_paths: List[str], output_path: str) -> bool:
-        """Uses FFmpeg complex filter to join clips with xfade and acrossfade."""
+        """Uses FFmpeg to join clips. Supports both concat (no transitions) and xfade (with transitions)."""
+        transition_type = self.highlight_cfg.get("transition_type", "fade")
+        
+        # 如果禁用转场或转场类型为none，使用简单concat
+        if transition_type == "none":
+            return self._join_with_concat(clip_paths, output_path)
+        else:
+            # 使用xfade转场（可能有花屏问题）
+            return self._join_with_xfade(clip_paths, output_path)
+    
+    def _join_with_concat(self, clip_paths: List[str], output_path: str) -> bool:
+        """使用concat filter快速拼接，无转场效果"""
+        try:
+            # 使用concat filter
+            cmd = [self.video_cfg.get("ffmpeg_path", "ffmpeg"), "-y"]
+            
+            if self.hwaccel == "cuda":
+                cmd.extend(["-hwaccel", "cuda"])
+            
+            # 添加所有输入
+            for path in clip_paths:
+                cmd.extend(["-i", path])
+            
+            # 构建concat filter
+            n = len(clip_paths)
+            video_inputs = "".join([f"[{i}:v]" for i in range(n)])
+            audio_inputs = "".join([f"[{i}:a]" for i in range(n)])
+            
+            filter_complex = f"{video_inputs}concat=n={n}:v=1:a=0[vout];{audio_inputs}concat=n={n}:v=0:a=1[aout]"
+            
+            cmd.extend([
+                "-filter_complex", filter_complex,
+                "-map", "[vout]",
+                "-map", "[aout]",
+                "-c:v", self.encoder,
+                "-preset", "p4",
+                "-b:v", self.bitrate,
+                "-c:a", "aac",
+                "-b:a", "192k",
+                output_path
+            ])
+            
+            logger.info(f"Joining {n} clips with concat filter (no transitions)...")
+            logger.debug(f"Running FFmpeg: {' '.join(cmd)}")
+            
+            subprocess.run(cmd, check=True, capture_output=True)
+            logger.info("Successfully joined clips with concat.")
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Concat join failed: {e.stderr.decode() if e.stderr else str(e)}")
+            return False
+    
+    def _join_with_xfade(self, clip_paths: List[str], output_path: str) -> bool:
+        """Uses FFmpeg xfade filter to join clips with transitions."""
         durations = []
         for path in clip_paths:
             try:
@@ -82,7 +136,7 @@ class VideoJoiner:
         # Filter complex
         filter_parts = []
         
-        # Initial labels
+        # Initial labels - 直接使用输入，所有clips已经用相同参数编码
         last_v_label = "0:v"
         last_a_label = "0:a"
         
@@ -129,6 +183,9 @@ class VideoJoiner:
             "-preset", "p4",
             "-b:v", self.bitrate,
             "-r", str(self.fps),
+            "-g", str(self.fps * 2),  # GOP size: 每2秒一个关键帧
+            "-bf", "0",  # 禁用B帧，xfade需要简单的帧结构
+            "-pix_fmt", "yuv420p",  # 确保像素格式一致
             "-c:a", "aac",
             "-b:a", "192k",
             output_path

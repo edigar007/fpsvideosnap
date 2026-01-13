@@ -17,7 +17,7 @@ video:
   ffmpeg_path: "ffmpeg"
   hwaccel: "cuda"
   encoder: "h264_nvenc"
-  bitrate: "20M"
+  bitrate: "25M"
   fps: 60
   
 # AI Detection settings

@@ -5,8 +5,10 @@ from src.ai.yolo_detector import YoloDetector
 from src.ai.opencv_matcher import OpenCVMatcher
 from src.ai.ocr_detector import OCRDetector
 from src.utils.logger import get_logger
+from src.utils.performance_profiler import get_profiler
 
 logger = get_logger(__name__)
+profiler = get_profiler()
 
 class KillDetector:
     """
@@ -61,7 +63,10 @@ class KillDetector:
         Fast color detection with result caching support.
         Returns: (passed: bool, max_color_pct: float)
         """
+        profiler.start('prefilter_color_detection')
+        
         if not self.colors:
+            profiler.end('prefilter_color_detection')
             return True, 1.0  # No colors defined, skip pre-filter
             
         max_color_pct = 0.0
@@ -84,7 +89,8 @@ class KillDetector:
                     roi=self.roi
                 )
                 max_color_pct = max(max_color_pct, pct)
-                
+        
+        profiler.end('prefilter_color_detection')
         return max_color_pct >= self.color_threshold, max_color_pct
 
     def _calculate_confidence(self, signals: Dict) -> float:
@@ -128,10 +134,7 @@ class KillDetector:
 
         # 将相对 ROI 转换为像素坐标（用于 OCR）
         h, w = frame.shape[:2]
-        x, y, w_roi, h_roi = self.roi
-        roi_px = [int(x * w), int(y * h), int(w_roi * w), int(h_roi * h)]
-
-        # 1. OCR Signal
+        profiler.start('precise_ocr_detection')
         ocr_conf = 0.0
         if self.ocr_enabled and self.ocr:
             ocr_cfg = detection_cfg.get('ocr', {})
@@ -139,6 +142,12 @@ class KillDetector:
             res = self.ocr.find_keywords(frame, keywords, roi=roi_px)
             if res['found']:
                 # fuzzy match gives 0-100, we want 0-1.0
+                ocr_conf = res['confidence'] / 100.0 if res['confidence'] > 1.0 else res['confidence']
+        signals['ocr'] = ocr_conf
+        profiler.end('precise_ocr_detection')
+
+        # 2. Template Signal
+        profiler.start('precise_template_matching')h gives 0-100, we want 0-1.0
                 ocr_conf = res['confidence'] / 100.0 if res['confidence'] > 1.0 else res['confidence']
         signals['ocr'] = ocr_conf
 
@@ -150,19 +159,23 @@ class KillDetector:
             if not template_list:
                 # Fallback to all loaded templates if not specified
                 for t_name in self.cv.templates:
-                    _, score = self.cv.match_template(frame, t_name, roi=self.roi)
-                    max_template_conf = max(max_template_conf, score)
-            else:
-                for t_name in template_list:
-                    _, score = self.cv.match_template(frame, t_name, roi=self.roi)
-                    max_template_conf = max(max_template_conf, score)
-        signals['template'] = max_template_conf
+        profiler.end('precise_template_matching')
 
         # 3. YOLO Signal
+        profiler.start('precise_yolo_detection')
         if yolo_conf is not None:
             max_yolo_conf = yolo_conf
         else:
             max_yolo_conf = 0.0
+            yolo_detections = self.yolo.detect_single(frame)
+            for d in yolo_detections:
+                if d['name'] == 'kill':
+                    max_yolo_conf = max(max_yolo_conf, d['conf'])
+        signals['yolo'] = max_yolo_conf
+        profiler.end('precise_yolo_detection')
+
+        # 4. Color Signal (使用缓存结果或重新计算)
+        profiler.start('precise_color_signal'
             yolo_detections = self.yolo.detect_single(frame)
             for d in yolo_detections:
                 if d['name'] == 'kill':
@@ -187,6 +200,7 @@ class KillDetector:
                     tolerance = color_cfg.get('tolerance', 0)
                     if tolerance > 0:
                         hsv_lower = [max(0, hsv_lower[0] - tolerance), max(0, hsv_lower[1] - tolerance), max(0, hsv_lower[2] - tolerance)]
+        profiler.end('precise_color_signal')
                         hsv_upper = [min(179, hsv_upper[0] + tolerance), min(255, hsv_upper[1] + tolerance), min(255, hsv_upper[2] + tolerance)]
                     
                     match_percent = self.cv.detect_color(frame, hsv_lower, hsv_upper, roi=self.roi)
@@ -228,17 +242,10 @@ class KillDetector:
         results["is_kill"] = final_conf >= self.conf_threshold
 
         return results
-
-    def process_video_batch(self, frames: List[np.ndarray], timestamps_ms: List[int]) -> List[dict]:
-        """
-        Processes a batch of frames and returns a list of kill events. (TASK-028)
-        Optimized using two-stage flow with color result caching.
-        """
-        events = []
-        batch_start = time.time()
+profiler.start('batch_processing_total')
         
         # Stage 1: Fast Filter all frames with color caching
-        prefilter_start = time.time()
+        profiler.start('batch_stage1_prefilter')
         candidate_indices = []
         color_cache = {}  # 缓存颜色检测结果，避免在 Stage 2 中重复计算
         
@@ -248,51 +255,53 @@ class KillDetector:
                 candidate_indices.append(i)
                 color_cache[i] = max_color_pct  # 缓存颜色结果
         
-        prefilter_time = time.time() - prefilter_start
+        prefilter_time = profiler.end('batch_stage1_prefilter')
         
         if not candidate_indices:
+            profiler.end('batch_processing_total')
             logger.debug(f"Batch processing: {len(frames)} frames, 0 candidates, prefilter: {prefilter_time:.3f}s")
             return []
 
         # Stage 2: Heavy detection for candidates
-        yolo_start = time.time()
+        profiler.start('batch_stage2_yolo')
         candidate_frames = [frames[i] for i in candidate_indices]
         
         # YOLO batch inference for candidates
         yolo_batch_results = self.yolo.detect_batch(candidate_frames)
-        yolo_time = time.time() - yolo_start
+        yolo_time = profiler.end('batch_stage2_yolo')
         
         # Stage 3: OCR and Template matching for each candidate
-        precise_start = time.time()
-        ocr_total_time = 0
-        template_total_time = 0
+        profiler.start('batch_stage3_precise')
         
         for idx, i in enumerate(candidate_indices):
             frame = frames[i]
             
             # Extract YOLO confidence from batch results
+            profiler.start('batch_extract_yolo_results')
             max_yolo_conf = 0.0
             for d in yolo_batch_results[idx]:
                 if d['name'] == 'kill':
                     max_yolo_conf = max(max_yolo_conf, d['conf'])
+            profiler.end('batch_extract_yolo_results')
             
             # Run other signals (OCR, Template) and combine with batch YOLO
             # 使用缓存的颜色结果避免重复计算
-            frame_precise_start = time.time()
+            profiler.start('batch_precise_detect_per_frame')
             cached_color = color_cache.get(i, 0.0)
             signals = self._precise_detect(frame, yolo_conf=max_yolo_conf, cached_color_pct=cached_color)
-            frame_precise_time = time.time() - frame_precise_start
-            
-            # 估算 OCR 时间（如果启用）
-            if self.ocr_enabled:
-                ocr_total_time += frame_precise_time * 0.8  # OCR 通常占 80% 的时间
+            profiler.end('batch_precise_detect_per_frame')
             
             # OCR Required logic
+            profiler.start('batch_ocr_required_check')
             ocr_cfg = self.config.get('detection', {}).get('ocr', {})
             if ocr_cfg.get('required', False) and signals.get('ocr', 0.0) == 0:
+                profiler.end('batch_ocr_required_check')
                 continue
+            profiler.end('batch_ocr_required_check')
 
+            profiler.start('batch_calculate_confidence')
             final_conf = self._calculate_confidence(signals)
+            profiler.end('batch_calculate_confidence')
             
             if final_conf >= self.conf_threshold:
                 events.append({
@@ -302,6 +311,19 @@ class KillDetector:
                     "signals": signals # Added for debugging (TASK-027 style)
                 })
         
+        precise_time = profiler.end('batch_stage3_precise')
+        total_time = profiler.end('batch_processing_total')
+        
+        # 记录批次级统计
+        profiler.record('batch_total_frames', len(frames))
+        profiler.record('batch_candidate_frames', len(candidate_indices))
+        profiler.record('batch_detected_events', len(events))
+        
+        # 详细的性能日志
+        logger.debug(
+            f"Batch: {len(frames)} frames, {len(candidate_indices)} candidates, {len(events)} events | "
+            f"Times: prefilter={prefilter_time:.3f}s, yolo={yolo_time:.3f}s, "
+            f"precise={precise_time:.3f}s
         precise_time = time.time() - precise_start
         total_time = time.time() - batch_start
         

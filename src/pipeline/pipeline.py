@@ -9,6 +9,7 @@ from datetime import datetime
 from src.utils.logger import get_logger
 from src.utils.progress import create_progress_bar
 from src.utils.temp_manager import temp_manager
+from src.utils.performance_profiler import get_profiler
 from src.video.video_info import VideoInfo
 from src.video.frame_extractor import FrameExtractor
 from src.ai.model_manager import ModelManager
@@ -24,6 +25,7 @@ from src.history.history_manager import HistoryManager
 from src.debug.detection_debugger import DetectionDebugger
 
 logger = get_logger(__name__)
+profiler = get_profiler()
 
 class StageStatus(Enum):
     PENDING = "PENDING"
@@ -151,6 +153,7 @@ class Pipeline:
             frame_dir = os.path.join(self.temp_dir, "frames")
             if self.stages["frames"].status != StageStatus.SUCCESS:
                 self._update_stage("frames", StageStatus.RUNNING)
+                profiler.start('stage_frame_extraction')
                 extractor = FrameExtractor(
                     ffmpeg_path=self.config.get("video", {}).get("ffmpeg_path", "ffmpeg"),
                     hwaccel=self.config.get("video", {}).get("hwaccel", "cuda")
@@ -158,6 +161,7 @@ class Pipeline:
                 interval = self.config.get("video", {}).get("frame_interval_ms", 1000)
                 frames = extractor.extract_frames(video_path, frame_dir, interval_ms=interval)
                 self.results["frames"] = frames
+                profiler.end('stage_frame_extraction')
                 self._update_stage("frames", StageStatus.SUCCESS)
             else:
                 frames = self.results.get("frames", [])
@@ -165,8 +169,10 @@ class Pipeline:
             # 3. Kill Detection
             if self.stages["detection"].status != StageStatus.SUCCESS:
                 self._update_stage("detection", StageStatus.RUNNING)
+                profiler.start('stage_detection_total')
                 
                 # Setup AI components
+                profiler.start('stage_detection_setup')
                 model_dir = self.config.get("ai", {}).get("model_dir", "models")
                 model_path = os.path.join(model_dir, "yolov8n.pt")
                 self.model_manager.model_path = model_path
@@ -186,6 +192,7 @@ class Pipeline:
                     logger.info(f"Loaded {len(opencv_matcher.templates)} templates from {template_dir}")
                 
                 kill_detector = KillDetector(yolo_detector, opencv_matcher, self.config)
+                profiler.end('stage_detection_setup')
                 
                 # Debug: Log detection configuration
                 detection_cfg = self.config.get('detection', {})
@@ -215,11 +222,14 @@ class Pipeline:
                 # 优化：增加 chunk_size 以减少批次数量，提高 GPU 利用率
                 chunk_size = 256 
                 
+                profiler.start('stage_detection_processing')
                 for i in range(0, len(frames), chunk_size):
                     chunk_paths = frames[i:i + chunk_size]
                     chunk_frames = []
                     chunk_timestamps = []
                     
+                    # 读取帧计时
+                    profiler.start('stage_detection_read_frames')
                     for frame_path in chunk_paths:
                         frame = cv2.imread(frame_path)
                         if frame is not None:
@@ -231,6 +241,7 @@ class Pipeline:
                                 chunk_timestamps.append(0)
                         else:
                             logger.warning(f"Failed to read frame: {frame_path}")
+                    profiler.end('stage_detection_read_frames')
 
                     if chunk_frames:
                         batch_events = kill_detector.process_video_batch(chunk_frames, chunk_timestamps)
@@ -243,6 +254,7 @@ class Pipeline:
                                 logger.debug(f"  Event: ts={event.get('timestamp_ms')}ms, conf={event.get('confidence', 0):.3f}")
                         
                         # TASK-004: Stream each event to TimestampRecorder
+                        profiler.start('stage_detection_record_events')
                         for event in batch_events:
                             timestamp_recorder.record_event(
                                 timestamp_ms=event.get("timestamp_ms", 0),
@@ -253,14 +265,20 @@ class Pipeline:
                                     "frame_path": event.get("frame_path", "")
                                 }
                             )
+                        profiler.end('stage_detection_record_events')
                     
                     pbar.update(len(chunk_paths))
-                    
+                
+                profiler.end('stage_detection_processing')    
                 pbar.close()
                 
                 # TASK-004: Save detection events to JSON
+                profiler.start('stage_detection_save_results')
                 timestamp_recorder.save()
                 logger.info(f"Detection events saved to {detection_json_path}")
+                profiler.end('stage_detection_save_results')
+                
+                profiler.end('stage_detection_total')
                 
                 # Debug: Log final detection statistics
                 logger.info(f"[bold]Detection Summary:[/bold]")
@@ -371,7 +389,11 @@ class Pipeline:
                 os.makedirs(output_dir, exist_ok=True)
             final_video_path = os.path.join(output_dir, final_video_name)
             
-            if self.stages["audio"].status != StageStatus.SUCCESS:
+            # 检查final_video是否已存在，如果不存在则重新执行audio阶段
+            final_video_exists = os.path.exists(final_video_path)
+            need_audio_mixing = (self.stages["audio"].status != StageStatus.SUCCESS) or not final_video_exists
+            
+            if need_audio_mixing:
                 if not joined_video or not os.path.exists(joined_video):
                     self._update_stage("audio", StageStatus.SKIPPED)
                 else:
@@ -385,6 +407,9 @@ class Pipeline:
                     
                     self.results["final_video"] = final_video_path
                     self._update_stage("audio", StageStatus.SUCCESS)
+            else:
+                # 从checkpoint恢复，final_video已存在
+                self.results["final_video"] = final_video_path
 
             # 7. Report Generation
             if self.stages["report"].status != StageStatus.SUCCESS:
@@ -415,6 +440,15 @@ class Pipeline:
                         os.remove(self.checkpoint_file)
                 self._update_stage("cleanup", StageStatus.SUCCESS)
 
+            # 10. 打印性能分析报告
+            profiler.print_summary()
+            
+            # 保存性能分析数据到文件
+            history_dir = self.config.get("global", {}).get("history_dir", "history")
+            run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            perf_file = os.path.join(history_dir, f"performance_{run_timestamp}.json")
+            profiler.save_to_file(perf_file)
+
             logger.info(f"[bold green]Pipeline completed successfully for {video_path}[/bold green]")
             return True
 
@@ -422,6 +456,10 @@ class Pipeline:
             logger.error(f"Pipeline failed at stage {self._get_current_stage()}: {e}")
             import traceback
             logger.debug(traceback.format_exc())
+            
+            # 即使失败也打印性能报告（帮助调试）
+            profiler.print_summary()
+            
             return False
 
     def _get_current_stage(self) -> str:

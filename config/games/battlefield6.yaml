@@ -39,4 +39,5 @@ detection:
 highlights:
   pre_kill_time: 5.0
   post_kill_time: 1.5
+  transition_type: random  # 暂时禁用转场，测试基本拼接
   music_path: "assets/music/Johan Soderqvist、Patrik Andrén - Battlefield Classic Theme - Mayhem View.mp3"

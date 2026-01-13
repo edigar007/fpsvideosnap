@@ -52,12 +52,23 @@ class ClipCutter:
         
         # Audio/Video encoding settings
         if self.hwaccel == "cuda":
-            cmd.extend(["-c:v", "h264_nvenc", "-preset", "p4"])
+            cmd.extend([
+                "-c:v", "h264_nvenc", 
+                "-preset", "p4",
+                "-g", "120",      # GOP size: 每2秒一个关键帧(60fps*2)
+                "-bf", "0",       # 禁用B帧，确保更好的随机访问
+            ])
         else:
-            cmd.extend(["-c:v", "libx264", "-preset", "medium"])
+            cmd.extend([
+                "-c:v", "libx264", 
+                "-preset", "medium",
+                "-g", "120",
+                "-bf", "0",
+            ])
             
         cmd.extend([
-            "-b:v", "15M",   # High bitrate for quality
+            "-b:v", "15M",    # High bitrate for quality
+            "-pix_fmt", "yuv420p",  # 确保像素格式一致
             "-c:a", "aac",    # Ensure audio is compatible
             "-y",             # Overwrite output
             output_path
