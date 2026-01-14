@@ -15,9 +15,9 @@ detection:
   template_dir: models/templates/battlefield_4
   colors: {}
   weights:
-    ocr: 0.4
-    template: 0.3
-    color: 0.2
+    ocr: 0.9
+    template: 0
+    color: 0
     yolo: 0.1
   prefilter:
     enabled: true
@@ -26,3 +26,5 @@ detection:
 highlights:
   pre_kill_time: 5.0
   post_kill_time: 2.0
+video:
+  frame_interval_ms: 500
