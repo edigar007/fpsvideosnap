@@ -19,6 +19,10 @@ video:
   encoder: "h264_nvenc"
   bitrate: "25M"
   fps: 60
+  # Frame extraction mode:
+  # - bulk: single ffmpeg run with fps+showinfo mapping (fast, mapped timestamps)
+  # - precise: per-frame ffmpeg -ss extraction (slow, deterministic)
+  frame_extraction_mode: "bulk"
   
 # AI Detection settings
 detection:

@@ -1,16 +1,166 @@
 import os
 import subprocess
+import json
+import re
 from typing import List, Optional
 from src.utils.logger import logger
 
 class FrameExtractor:
     """Extracts frames from video using FFmpeg with hardware acceleration support."""
     
-    def __init__(self, ffmpeg_path: str = "ffmpeg", hwaccel: Optional[str] = "cuda"):
+    def __init__(
+        self,
+        ffmpeg_path: str = "ffmpeg",
+        hwaccel: Optional[str] = "cuda",
+        mode: str = "bulk",
+    ):
         self.ffmpeg_path = ffmpeg_path
         self.hwaccel = hwaccel
+        self.mode = mode
 
-    def extract_frames(self, video_path: str, output_dir: str, interval_ms: int = 100) -> List[str]:
+    def _ffmpeg_base_cmd(self) -> List[str]:
+        cmd = [self.ffmpeg_path]
+        if self.hwaccel == "cuda":
+            cmd.extend(["-hwaccel", "cuda"])
+        return cmd
+
+    def _extract_frames_bulk(
+        self,
+        video_path: str,
+        output_dir: str,
+        interval_ms: int = 100,
+        start_ms: Optional[int] = None,
+        end_ms: Optional[int] = None,
+    ) -> List[str]:
+        """Bulk extract frames in a single ffmpeg run.
+
+        Strategy:
+        - Use ffmpeg filter fps to sample frames at a fixed interval.
+        - Use showinfo to read actual pts_time for each output frame.
+        - Rename output to frame_{timestamp_ms}.jpg, using parsed pts_time.
+
+        This avoids per-frame ffmpeg startup cost while keeping accurate timestamp mapping.
+        """
+        video_path = os.path.abspath(video_path)
+        output_dir = os.path.abspath(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Temporary sequential names; we rename using showinfo mapping afterwards
+        tmp_pattern = os.path.join(output_dir, "tmp_%06d.jpg")
+
+        fps = 1000.0 / float(interval_ms)
+        vf = f"fps={fps},showinfo"
+
+        cmd = self._ffmpeg_base_cmd()
+        if start_ms is not None and start_ms > 0:
+            cmd.extend(["-ss", str(float(start_ms) / 1000.0)])
+        cmd.extend(
+            [
+                "-hide_banner",
+                "-loglevel",
+                "info",
+                "-i",
+                video_path,
+            ]
+        )
+        if end_ms is not None and start_ms is not None and end_ms > start_ms:
+            duration_s = float(end_ms - start_ms) / 1000.0
+            cmd.extend(["-t", str(duration_s)])
+
+        cmd.extend(
+            [
+                "-vf",
+                vf,
+                "-vsync",
+                "vfr",
+                "-q:v",
+                "2",
+                "-start_number",
+                "0",
+                "-y",
+                tmp_pattern,
+            ]
+        )
+
+        logger.info(
+            f"Extracting frames (bulk) from {os.path.basename(video_path)} interval={interval_ms}ms via ffmpeg filter..."
+        )
+
+        # Parse showinfo lines from stderr
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if proc.returncode != 0:
+            logger.error(f"FFmpeg bulk extraction failed: {proc.stderr[-2000:]}")
+            raise RuntimeError("FFmpeg bulk extraction failed")
+
+        showinfo_re = re.compile(r"showinfo.*? n:\s*(\d+).*? pts_time:\s*([0-9\.]+)")
+        mapping = []
+        offset_ms = int(start_ms) if start_ms is not None else 0
+        for line in (proc.stderr or "").splitlines():
+            m = showinfo_re.search(line)
+            if not m:
+                continue
+            n = int(m.group(1))
+            pts_time = float(m.group(2))
+            ts_ms = offset_ms + int(round(pts_time * 1000.0))
+            mapping.append({"n": n, "pts_time": pts_time, "timestamp_ms": ts_ms})
+
+        if not mapping:
+            raise RuntimeError("No showinfo mapping parsed; cannot map timestamps")
+
+        # Rename tmp_%06d.jpg -> frame_{timestamp_ms}.jpg
+        final_files: List[str] = []
+        used_names = set()
+        for item in mapping:
+            n = item["n"]
+            ts_ms = item["timestamp_ms"]
+            src = os.path.join(output_dir, f"tmp_{n:06d}.jpg")
+            if not os.path.exists(src):
+                # If ffmpeg skipped writing due to filter nuances, skip
+                continue
+
+            base_name = f"frame_{ts_ms}.jpg"
+            dst = os.path.join(output_dir, base_name)
+            if dst in used_names or os.path.exists(dst):
+                # Collision safety
+                k = 1
+                while True:
+                    alt = os.path.join(output_dir, f"frame_{ts_ms}_{k}.jpg")
+                    if alt not in used_names and not os.path.exists(alt):
+                        dst = alt
+                        break
+                    k += 1
+
+            os.replace(src, dst)
+            used_names.add(dst)
+            final_files.append(dst)
+
+        # Cleanup any remaining tmp files
+        for name in os.listdir(output_dir):
+            if name.startswith("tmp_") and name.lower().endswith(".jpg"):
+                try:
+                    os.remove(os.path.join(output_dir, name))
+                except Exception:
+                    pass
+
+        # Save mapping for debugging
+        try:
+            mapping_path = os.path.join(output_dir, "frames_mapping.json")
+            with open(mapping_path, "w", encoding="utf-8") as f:
+                json.dump(mapping, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+        logger.info(f"Bulk extracted {len(final_files)} frames")
+        return final_files
+
+    def extract_frames(
+        self,
+        video_path: str,
+        output_dir: str,
+        interval_ms: int = 100,
+        start_ms: Optional[int] = None,
+        end_ms: Optional[int] = None,
+    ) -> List[str]:
         """
         Extracts frames at regular intervals with precise timestamps.
         Naming convention: frame_{timestamp_ms}.jpg
@@ -18,6 +168,18 @@ class FrameExtractor:
         使用循环的 -ss 参数来确保每帧的时间戳完全准确。
         这比过滤器方法慢，但可以保证时间戳的绝对精确性，避免累积误差。
         """
+        if self.mode == "bulk":
+            try:
+                return self._extract_frames_bulk(
+                    video_path,
+                    output_dir,
+                    interval_ms=interval_ms,
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                )
+            except Exception as e:
+                logger.warning(f"Bulk extraction failed, falling back to precise mode: {e}")
+
         video_path = os.path.abspath(video_path)
         output_dir = os.path.abspath(output_dir)
         

@@ -156,7 +156,8 @@ class Pipeline:
                 profiler.start('stage_frame_extraction')
                 extractor = FrameExtractor(
                     ffmpeg_path=self.config.get("video", {}).get("ffmpeg_path", "ffmpeg"),
-                    hwaccel=self.config.get("video", {}).get("hwaccel", "cuda")
+                    hwaccel=self.config.get("video", {}).get("hwaccel", "cuda"),
+                    mode=self.config.get("video", {}).get("frame_extraction_mode", "bulk"),
                 )
                 interval = self.config.get("video", {}).get("frame_interval_ms", 1000)
                 frames = extractor.extract_frames(video_path, frame_dir, interval_ms=interval)
