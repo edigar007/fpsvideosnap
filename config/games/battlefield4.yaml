@@ -13,7 +13,17 @@ detection:
     required: false
   templates: {}
   template_dir: models/templates/battlefield_4
-  colors: {}
+  colors:
+    white:
+      hsv_lower:
+      - 81
+      - 75
+      - 0
+      hsv_upper:
+      - 121
+      - 155
+      - 71
+      tolerance: 50
   weights:
     ocr: 0.9
     template: 0
