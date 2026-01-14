@@ -1,0 +1,9 @@
+# Windows + NVIDIA GPU (PaddlePaddle GPU)
+# PaddlePaddle 官方 GPU wheels 位于其自建索引；需要把它作为 extra index 才能让 pip/uv 同时从 PyPI 拉其它依赖。
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
+
+# 先装项目通用依赖
+-r requirements.txt
+
+# 用 GPU 版覆盖/替代 CPU 版
+paddlepaddle-gpu==3.2.0

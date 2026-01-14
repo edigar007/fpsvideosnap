@@ -1,8 +1,6 @@
 from typing import List, Dict, Optional
 import numpy as np
 import time
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.ai.yolo_detector import YoloDetector
 from src.ai.opencv_matcher import OpenCVMatcher
 from src.ai.ocr_detector import OCRDetector
@@ -54,10 +52,8 @@ class KillDetector:
         })
         
         # Multi-threading settings
-        self.max_workers = detection_cfg.get('max_workers', 4)  # 默认4个线程
-        self.use_threading = detection_cfg.get('use_threading', True)  # 默认启用
-        self._ocr_lock = threading.Lock()  # OCR 线程锁
-        self._cv_lock = threading.Lock()  # OpenCV 线程锁
+        # NOTE: 多线程并行候选帧处理已移除。
+        # 经验上此处线程容易被 OCR/OpenCV 锁与 GIL 抵消收益，且 GPU 推理本身已 batch 化。
 
     def _prefilter(self, frame: np.ndarray) -> bool:
         """
@@ -151,9 +147,7 @@ class KillDetector:
         if self.ocr_enabled and self.ocr:
             ocr_cfg = detection_cfg.get('ocr', {})
             keywords = ocr_cfg.get('keywords', ["击杀", "KILL"])
-            # 使用线程锁保护OCR调用
-            with self._ocr_lock:
-                res = self.ocr.find_keywords(frame, keywords, roi=roi_px)
+            res = self.ocr.find_keywords(frame, keywords, roi=roi_px)
             if res['found']:
                 # fuzzy match gives 0-100, we want 0-1.0
                 ocr_conf = res['confidence'] / 100.0 if res['confidence'] > 1.0 else res['confidence']
@@ -166,17 +160,15 @@ class KillDetector:
         if self.cv.templates:
             # We check templates defined in config
             template_list = detection_cfg.get('templates', {})
-            # 使用线程锁保护模板匹配
-            with self._cv_lock:
-                if not template_list:
-                    # Fallback to all loaded templates if not specified
-                    for t_name in self.cv.templates:
-                        _, score = self.cv.match_template(frame, t_name, roi=self.roi)
-                        max_template_conf = max(max_template_conf, score)
-                else:
-                    for t_name in template_list:
-                        _, score = self.cv.match_template(frame, t_name, roi=self.roi)
-                        max_template_conf = max(max_template_conf, score)
+            if not template_list:
+                # Fallback to all loaded templates if not specified
+                for t_name in self.cv.templates:
+                    _, score = self.cv.match_template(frame, t_name, roi=self.roi)
+                    max_template_conf = max(max_template_conf, score)
+            else:
+                for t_name in template_list:
+                    _, score = self.cv.match_template(frame, t_name, roi=self.roi)
+                    max_template_conf = max(max_template_conf, score)
         signals['template'] = max_template_conf
         profiler.end('precise_template_matching')
 
@@ -254,103 +246,6 @@ class KillDetector:
         results["is_kill"] = final_conf >= self.conf_threshold
 
         return results
-
-    def _process_single_candidate(self, frame: np.ndarray, timestamp_ms: int, 
-                                  yolo_results: List[dict], cached_color: float) -> Optional[dict]:
-        """
-        处理单个候选帧的精确检测（线程安全）
-        
-        Args:
-            frame: 帧图像
-            timestamp_ms: 时间戳
-            yolo_results: YOLO检测结果
-            cached_color: 缓存的颜色匹配百分比
-            
-        Returns:
-            检测到的事件字典，如果不满足条件则返回None
-        """
-        try:
-            # Extract YOLO confidence from batch results
-            max_yolo_conf = 0.0
-            for d in yolo_results:
-                if d['name'] == 'kill':
-                    max_yolo_conf = max(max_yolo_conf, d['conf'])
-            
-            # Run other signals (OCR, Template) and combine with batch YOLO
-            signals = self._precise_detect(frame, yolo_conf=max_yolo_conf, cached_color_pct=cached_color)
-            
-            # OCR Required logic
-            ocr_cfg = self.config.get('detection', {}).get('ocr', {})
-            if ocr_cfg.get('required', False) and signals.get('ocr', 0.0) == 0:
-                return None
-            
-            # Calculate confidence
-            final_conf = self._calculate_confidence(signals)
-            
-            if final_conf >= self.conf_threshold:
-                return {
-                    "timestamp_ms": timestamp_ms,
-                    "confidence": final_conf,
-                    "type": "kill",
-                    "signals": signals
-                }
-            return None
-        except Exception as e:
-            logger.error(f"Error processing candidate at timestamp {timestamp_ms}ms: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
-            return None
-
-    def _process_candidates_parallel(self, frames: List[np.ndarray], 
-                                    candidate_indices: List[int],
-                                    timestamps_ms: List[int],
-                                    yolo_batch_results: List[List[dict]],
-                                    color_cache: dict) -> List[dict]:
-        """
-        多线程并行处理候选帧
-        """
-        events = []
-        
-        profiler.start('batch_stage3_parallel_submit')
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # 提交所有任务
-            future_to_index = {}
-            for idx, i in enumerate(candidate_indices):
-                future = executor.submit(
-                    self._process_single_candidate,
-                    frames[i],
-                    timestamps_ms[i],
-                    yolo_batch_results[idx],
-                    color_cache.get(i, 0.0)
-                )
-                future_to_index[future] = i
-            profiler.end('batch_stage3_parallel_submit')
-            
-            # 收集结果
-            profiler.start('batch_stage3_parallel_collect')
-            completed = 0
-            failed = 0
-            for future in as_completed(future_to_index):
-                try:
-                    result = future.result()
-                    completed += 1
-                    if result is not None:
-                        events.append(result)
-                except Exception as e:
-                    failed += 1
-                    frame_idx = future_to_index[future]
-                    logger.error(f"Thread processing error for frame {frame_idx}: {e}")
-                    import traceback
-                    logger.debug(traceback.format_exc())
-            
-            if failed > 0:
-                logger.warning(f"Parallel processing: {completed} succeeded, {failed} failed")
-            
-            profiler.end('batch_stage3_parallel_collect')
-        
-        # 按时间戳排序
-        events.sort(key=lambda x: x['timestamp_ms'])
-        return events
 
     def _process_candidates_sequential(self, frames: List[np.ndarray],
                                       candidate_indices: List[int],
@@ -438,27 +333,12 @@ class KillDetector:
         
         # Stage 3: OCR and Template matching for each candidate
         profiler.start('batch_stage3_precise')
-        
-        if self.use_threading and len(candidate_indices) > 1:
-            # 多线程处理
-            try:
-                events.extend(self._process_candidates_parallel(
-                    frames, candidate_indices, timestamps_ms, 
-                    yolo_batch_results, color_cache
-                ))
-            except Exception as e:
-                logger.error(f"Parallel processing failed, falling back to sequential: {e}")
-                # 降级到单线程处理
-                events.extend(self._process_candidates_sequential(
-                    frames, candidate_indices, timestamps_ms,
-                    yolo_batch_results, color_cache
-                ))
-        else:
-            # 单线程处理（兼容模式）
-            events.extend(self._process_candidates_sequential(
-                frames, candidate_indices, timestamps_ms,
-                yolo_batch_results, color_cache
-            ))
+
+        # 单线程顺序处理（推荐/默认）
+        events.extend(self._process_candidates_sequential(
+            frames, candidate_indices, timestamps_ms,
+            yolo_batch_results, color_cache
+        ))
         
         precise_time = profiler.end('batch_stage3_precise')
         total_time = profiler.end('batch_processing_total')
@@ -469,10 +349,10 @@ class KillDetector:
         profiler.record('batch_detected_events', len(events))
         
         # 详细的性能日志
-        threading_mode = "parallel" if self.use_threading and len(candidate_indices) > 1 else "sequential"
+        threading_mode = "sequential"
         logger.debug(
             f"Batch: {len(frames)} frames, {len(candidate_indices)} candidates, {len(events)} events | "
-            f"Mode: {threading_mode} (workers={self.max_workers}) | "
+            f"Mode: {threading_mode} | "
             f"Times: prefilter={prefilter_time:.3f}s, yolo={yolo_time:.3f}s, "
             f"precise={precise_time:.3f}s, total={total_time:.3f}s"
         )

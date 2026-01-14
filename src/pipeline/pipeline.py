@@ -318,6 +318,13 @@ class Pipeline:
                     debugger.generate_debug_overlay(video_path, detected_events, debug_video_path)
                     self.results["debug_video"] = debug_video_path
                     logger.info(f"Visual debug evidence saved to {debug_viz_dir}")
+
+                    # 显式释放 OCR 资源（Windows 下可能包含子进程 PaddleOCR worker）
+                    try:
+                        if getattr(kill_detector, "ocr", None) is not None:
+                            kill_detector.ocr.close()
+                    except Exception:
+                        pass
                 # -----------------------------------
                 
             else:

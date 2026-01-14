@@ -1,0 +1,10 @@
+# 仅用于独立 PaddleOCR GPU 环境（避免与 PyTorch/Torch CUDA DLL 冲突）
+# 安装：uv venv --python 3.12.11 .venv_paddle
+#      uv pip install --python .venv_paddle -r requirements-win-paddleocr-gpu-standalone.txt
+
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/
+
+paddlepaddle-gpu==3.2.0
+paddleocr==3.3.2
+numpy
+opencv-python
