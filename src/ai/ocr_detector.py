@@ -1,6 +1,48 @@
 import numpy as np
 import cv2
+import os
+import sys
 from typing import List, Dict, Union, Optional
+
+# Windows GPU 支持：必须在导入 PaddleOCR 之前设置 CUDA DLL 路径
+if sys.platform == 'win32':
+    try:
+        import site
+        # 获取 site-packages 路径
+        site_packages_list = site.getsitepackages()
+        site_packages = None
+        for sp in site_packages_list:
+            if os.path.exists(os.path.join(sp, 'nvidia')):
+                site_packages = sp
+                break
+        
+        if site_packages:
+            nvidia_dirs = [
+                'nvidia\\cudnn\\bin',
+                'nvidia\\cublas\\bin', 
+                'nvidia\\cuda_runtime\\bin',
+                'nvidia\\cufft\\bin',
+                'nvidia\\curand\\bin',
+                'nvidia\\cusolver\\bin',
+                'nvidia\\cusparse\\bin',
+                'nvidia\\nvjitlink\\bin',
+            ]
+            
+            # 使用 PATH 方法（最兼容）
+            added_paths = []
+            current_path = os.environ.get('PATH', '')
+            for nvidia_dir in nvidia_dirs:
+                nvidia_path = os.path.join(site_packages, nvidia_dir)
+                if os.path.exists(nvidia_path) and nvidia_path not in current_path:
+                    os.environ['PATH'] = nvidia_path + os.pathsep + current_path
+                    current_path = os.environ['PATH']
+                    added_paths.append(nvidia_path)
+            
+            if added_paths:
+                print(f"[GPU] Added {len(added_paths)} CUDA DLL paths to PATH")
+    except Exception as e:
+        print(f"[GPU] Warning: Failed to add CUDA paths: {e}")
+
 try:
     from fuzzywuzzy import fuzz
 except ImportError:
@@ -21,8 +63,13 @@ logger = get_logger("ocr_detector")
 try:
     from paddleocr import PaddleOCR
     HAS_PADDLEOCR = True
-except ImportError:
+    logger.info("PaddleOCR imported successfully")
+except ImportError as e:
     HAS_PADDLEOCR = False
+    logger.error(f"Failed to import PaddleOCR: {e}")
+except Exception as e:
+    HAS_PADDLEOCR = False
+    logger.error(f"Error importing PaddleOCR: {e}")
 
 try:
     import easyocr
@@ -52,12 +99,19 @@ class OCRDetector:
         
         if HAS_PADDLEOCR:
             try:
-                # PaddleOCR 3.x 只使用最基本的参数
-                self.ocr_engine = PaddleOCR(use_angle_cls=True, lang=self.lang)
+                # PaddleOCR 3.x使用 device 参数：'cpu' 或 'gpu:0'
+                # 即使安装了 GPU 版本，也可以通过 device='cpu' 强制使用 CPU
+                device = 'gpu:0' if self.use_gpu else 'cpu'
+                self.ocr_engine = PaddleOCR(
+                    use_angle_cls=True, 
+                    lang=self.lang,
+                    device=device
+                )
                 self.engine_type = 'paddle'
-                logger.info(f"Initialized PaddleOCR (lang={lang})")
+                logger.info(f"Initialized PaddleOCR (lang={lang}, device={device})")
             except Exception as e:
                 logger.error(f"Failed to initialize PaddleOCR: {e}")
+                logger.info("Will try EasyOCR as fallback...")
 
         if not self.ocr_engine and HAS_EASYOCR:
             try:

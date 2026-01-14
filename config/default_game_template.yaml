@@ -31,6 +31,10 @@ detection:
     enabled: true
     color_threshold: 0.01
   
+  # 多线程配置（加速精确检测）
+  use_threading: true  # 是否启用多线程
+  max_workers: 4  # 线程池大小，建议设置为 CPU 核心数
+  
   # 置信度阈值
   confidence_threshold: 0.5
 

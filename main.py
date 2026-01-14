@@ -1,6 +1,32 @@
 import sys
 import os
 
+# Windows GPU 支持：在所有导入之前添加 CUDA DLL 目录
+if sys.platform == 'win32':
+    try:
+        import site
+        site_packages_list = site.getsitepackages()
+        for site_packages in site_packages_list:
+            nvidia_base = os.path.join(site_packages, 'nvidia')
+            if os.path.exists(nvidia_base):
+                # 获取所有 nvidia 子目录中的 bin 文件夹
+                for nvidia_pkg in os.listdir(nvidia_base):
+                    bin_path = os.path.join(nvidia_base, nvidia_pkg, 'bin')
+                    if os.path.exists(bin_path):
+                        try:
+                            # Python 3.8+ Windows 10+ 使用 add_dll_directory
+                            if hasattr(os, 'add_dll_directory'):
+                                os.add_dll_directory(bin_path)
+                            # 同时添加到 PATH（兼容性）
+                            if bin_path not in os.environ.get('PATH', ''):
+                                os.environ['PATH'] = bin_path + os.pathsep + os.environ.get('PATH', '')
+                        except Exception:
+                            pass
+                print(f"[GPU] CUDA DLL directories configured for PaddleOCR GPU support")
+                break
+    except Exception as e:
+        print(f"[GPU] Warning: Could not configure CUDA paths: {e}")
+
 # Add src to python path
 sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 

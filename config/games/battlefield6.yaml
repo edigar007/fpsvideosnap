@@ -36,6 +36,14 @@ detection:
       - 105
       - 123
       tolerance: 20
+  # 多线程配置
+  use_threading: true
+  max_workers: 6  # 战地6可以使用更多线程
+  # 预过滤配置
+  prefilter:
+    enabled: true
+    color_threshold: 0.01
+  confidence_threshold: 0.5
 highlights:
   pre_kill_time: 5.0
   post_kill_time: 1.5
