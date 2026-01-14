@@ -15,10 +15,23 @@ global:
 # Video processing settings
 video:
   ffmpeg_path: "ffmpeg"
+  ffprobe_path: "ffprobe"
   hwaccel: "cuda"
   encoder: "h264_nvenc"
   bitrate: "25M"
   fps: 60
+  # Clip cutting behavior
+  clip_cut:
+    # If true, try fast "-c copy" cutting when highlights.transition_type is "none".
+    # Note: many games/recorders produce open-GOP streams; stream copy clips may show
+    # corruption at the start in VLC even if other players look fine.
+    use_stream_copy: false
+    # Align clip start time to the nearest previous keyframe to avoid decoder artifacts
+    # (e.g., VLC showing corruption in the first ~seconds).
+    # Note: This may shift the clip slightly earlier (typically within one GOP).
+    align_to_keyframes: true
+    # How far back to scan for a keyframe near the requested start time.
+    keyframe_scan_window_s: 15.0
   # Frame extraction mode:
   # - bulk: single ffmpeg run with fps+showinfo mapping (fast, mapped timestamps)
   # - precise: per-frame ffmpeg -ss extraction (slow, deterministic)

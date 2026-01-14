@@ -28,9 +28,13 @@ class ClipExtractor:
         self.merger = OverlapMerger()
         self.detector = MultiKillDetector(self.multikill_threshold)
         
+        clip_cut_cfg = self.video_cfg.get("clip_cut", {})
         self.cutter = ClipCutter(
             ffmpeg_path=self.video_cfg.get("ffmpeg_path", "ffmpeg"),
-            hwaccel=self.video_cfg.get("hwaccel", "cuda")
+            hwaccel=self.video_cfg.get("hwaccel", "cuda"),
+            ffprobe_path=self.video_cfg.get("ffprobe_path", "ffprobe"),
+            align_to_keyframes=bool(clip_cut_cfg.get("align_to_keyframes", False)),
+            keyframe_scan_window_s=float(clip_cut_cfg.get("keyframe_scan_window_s", 10.0)),
         )
 
     def extract_from_json(self, video_path: str, json_path: str, output_dir: str) -> List[Dict]:
@@ -91,7 +95,9 @@ class ClipExtractor:
                     # TASK-009: Prefer stream copy if transitions are disabled to speed up processing
                     # and avoid double re-encoding quality loss
                     transition_type = self.highlights_cfg.get("transition_type", "random")
-                    use_copy = (transition_type == "none")
+                    use_copy = (transition_type == "none") and bool(
+                        self.video_cfg.get("clip_cut", {}).get("use_stream_copy", False)
+                    )
                     
                     self.cutter.cut_segment(video_path, output_path, start, duration, use_stream_copy=use_copy)
                     

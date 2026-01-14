@@ -90,10 +90,17 @@ class VideoJoiner:
                 "-c:v", self.encoder,
                 "-preset", "p4",
                 "-b:v", self.bitrate,
+                "-g", str(self.fps * 2),
+                "-bf", "0",
                 "-c:a", "aac",
                 "-b:a", "192k",
-                output_path
             ])
+
+            # NVENC: force keyframes to be IDR for better random access / VLC compatibility
+            if self.encoder == "h264_nvenc":
+                cmd.extend(["-forced-idr", "1", "-strict_gop", "1"])
+
+            cmd.append(output_path)
             
             logger.info(f"Joining {n} clips with concat filter (no transitions)...")
             logger.debug(f"Running FFmpeg: {' '.join(cmd)}")
@@ -188,8 +195,13 @@ class VideoJoiner:
             "-pix_fmt", "yuv420p",  # 确保像素格式一致
             "-c:a", "aac",
             "-b:a", "192k",
-            output_path
         ])
+
+        if self.encoder == "h264_nvenc":
+            # Force IDR at keyframes (esp. the first one) to prevent initial corruption in VLC.
+            cmd.extend(["-forced-idr", "1", "-strict_gop", "1"])
+
+        cmd.append(output_path)
 
         try:
             logger.info(f"Running FFmpeg: {' '.join(cmd)}")
