@@ -67,9 +67,23 @@ def parse_args():
         help="Enable debug mode for the Flask server"
     )
 
+    # Command: dashboard
+    dashboard_parser = subparsers.add_parser("dashboard", help="Start the web-based batch processing dashboard")
+    dashboard_parser.add_argument(
+        "--port", 
+        type=int, 
+        default=8081, 
+        help="Port to run the dashboard on (default: 8081)"
+    )
+    dashboard_parser.add_argument(
+        "--debug", 
+        action="store_true", 
+        help="Enable debug mode for the Flask server"
+    )
+
     # Default to 'run' if no command is provided and we have arguments
     # This maintains backward compatibility for `python main.py --video ...`
-    if len(sys.argv) > 1 and sys.argv[1] not in ["run", "config-assistant", "-h", "--help"]:
+    if len(sys.argv) > 1 and sys.argv[1] not in ["run", "config-assistant", "dashboard", "-h", "--help"]:
         sys.argv.insert(1, "run")
     
     # If no arguments at all, show help

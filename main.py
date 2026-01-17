@@ -47,6 +47,12 @@ def main():
         logger.info("[bold blue]Launching Config Assistant...[/bold blue]")
         run_server(port=args.port, debug=args.debug)
         return
+    
+    if args.command == "dashboard":
+        from src.tools.dashboard.server import run_server
+        logger.info("[bold blue]Launching Dashboard...[/bold blue]")
+        run_server(port=args.port, debug=args.debug)
+        return
 
     # Default 'run' behavior
     logger.info("[bold blue]Starting FPS Video Snap Highlights Generator...[/bold blue]")

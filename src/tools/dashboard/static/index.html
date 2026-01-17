@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FPS Video Snap - 剪辑控制台</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎮</text></svg>">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header Section -->
+        <header class="cyber-header">
+            <div class="logo-area">
+                <span class="icon">🎮</span>
+                <h1>FPS Video Snap <span class="badge">PRO</span></h1>
+            </div>
+            <div class="status-indicator" id="globalStatus">
+                <span class="status-dot"></span>
+                <span class="status-text">系统就绪</span>
+            </div>
+        </header>
+
+        <!-- Main Grid -->
+        <main class="control-grid">
+            <!-- Left Column: Controls -->
+            <section class="panel control-panel">
+                <div class="panel-header">
+                    <h2>配置与源文件</h2>
+                </div>
+                
+                <div class="panel-body">
+                    <!-- Game Selection -->
+                    <div class="form-group">
+                        <label for="gameSelect">目标游戏</label>
+                        <div class="select-wrapper">
+                            <select id="gameSelect">
+                                <option value="" disabled selected>加载中...</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Directory Scan -->
+                    <div class="form-group">
+                        <label for="dirInput">视频目录</label>
+                        <div class="input-group">
+                            <input type="text" id="dirInput" placeholder="例如: D:\Videos\Battlefield 2042" value="D:\videos">
+                            <button id="scanBtn" class="btn btn-secondary">
+                                <span class="icon">🔍</span> 扫描
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Video List -->
+                    <div class="video-list-section">
+                        <div class="list-header">
+                            <label class="checkbox-wrapper">
+                                <input type="checkbox" id="selectAll">
+                                <span class="checkmark"></span>
+                                全选
+                            </label>
+                            <span class="counter" id="fileCount">0 个文件</span>
+                        </div>
+                        <div class="video-list-container" id="videoList">
+                            <div class="empty-state">
+                                <span>请扫描目录以查找视频文件</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="action-bar">
+                        <div class="selection-info">
+                            已选: <strong id="selectedCount" class="highlight-text">0</strong>
+                        </div>
+                        <button id="startBtn" class="btn btn-primary" disabled>
+                            ▶️ 开始剪辑
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Column: Logs & Status -->
+            <section class="panel log-panel">
+                <div class="panel-header">
+                    <h2>执行日志</h2>
+                    <div class="panel-actions">
+                        <button id="clearLogsBtn" class="btn btn-xs btn-outline">清空</button>
+                    </div>
+                </div>
+                
+                <div class="log-viewport" id="logContainer">
+                    <!-- Logs will appear here -->
+                    <div class="log-entry log-info">
+                        <span class="time">[SYSTEM]</span>
+                        <span class="msg">等待任务启动...</span>
+                    </div>
+                </div>
+
+                <div class="status-footer">
+                    <div class="progress-info">
+                        <span id="taskStatusText">状态: 空闲</span>
+                    </div>
+                    <button id="cancelBtn" class="btn btn-danger hidden">
+                        🛑 取消任务
+                    </button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
