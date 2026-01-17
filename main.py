@@ -47,6 +47,12 @@ def main():
         logger.info("[bold blue]Launching Config Assistant...[/bold blue]")
         run_server(port=args.port, debug=args.debug)
         return
+    
+    if args.command == "dashboard":
+        from src.tools.dashboard.server import run_server
+        logger.info("[bold blue]Launching Dashboard...[/bold blue]")
+        run_server(port=args.port, debug=args.debug)
+        return
 
     # Default 'run' behavior
     logger.info("[bold blue]Starting FPS Video Snap Highlights Generator...[/bold blue]")
@@ -76,12 +82,25 @@ def main():
     
     try:
         processor = BatchProcessor(config)
-        results = processor.process(args.video)
+        results = processor.process(args.video)  # args.video is now a list
         
         # Final Summary
-        success_count = sum(1 for r in results if r['success'])
-        logger.info(f"\n[bold green]Batch processing finished![/bold green]")
-        logger.info(f"Successfully processed: [green]{success_count}/{len(results)}[/green]")
+        if not results:
+            logger.warning("No videos were processed.")
+            return
+            
+        # Check if multi-video merge was performed
+        merged_result = next((r for r in results if r.get("path") == "MERGED"), None)
+        
+        if merged_result:
+            logger.info(f"\n[bold green]Multi-video merge complete![/bold green]")
+            logger.info(f"  Source videos: {merged_result.get('source_videos', 0)}")
+            logger.info(f"  Total clips: {merged_result.get('total_clips', 0)}")
+            logger.info(f"  Output: [cyan]{merged_result.get('final_video')}[/cyan]")
+        else:
+            success_count = sum(1 for r in results if r.get('success'))
+            logger.info(f"\n[bold green]Processing finished![/bold green]")
+            logger.info(f"Successfully processed: [green]{success_count}/{len(results)}[/green]")
         
     except Exception as e:
         logger.exception(f"An unexpected error occurred during processing: {e}")
