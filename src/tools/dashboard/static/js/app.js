@@ -4,11 +4,20 @@ document.addEventListener('DOMContentLoaded', () => {
         games: [],
         videos: [],
         selectedVideos: new Set(),
-        taskStatus: 'idle', // idle, running, completed, failed
-        logIndex: 0,
-        logPollingInterval: null,
+        taskStatus: 'idle',
+        errorIndex: 0,
         statusPollingInterval: null
     };
+
+    // Stage configuration
+    const STAGES = [
+        { id: 'metadata', name: '视频元数据' },
+        { id: 'frames', name: '帧提取' },
+        { id: 'detection', name: '击杀检测' },
+        { id: 'clips', name: '片段提取' },
+        { id: 'join', name: '视频拼接' },
+        { id: 'audio', name: '音频混合' }
+    ];
 
     // DOM Elements
     const elements = {
@@ -21,12 +30,20 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedCount: document.getElementById('selectedCount'),
         startBtn: document.getElementById('startBtn'),
         cancelBtn: document.getElementById('cancelBtn'),
-        logContainer: document.getElementById('logContainer'),
-        clearLogsBtn: document.getElementById('clearLogsBtn'),
         taskStatusText: document.getElementById('taskStatusText'),
         globalStatus: document.getElementById('globalStatus'),
         statusDot: document.querySelector('.status-dot'),
-        statusText: document.querySelector('.status-text')
+        statusText: document.querySelector('.status-text'),
+        // Progress elements
+        currentVideoInfo: document.getElementById('currentVideoInfo'),
+        stageList: document.getElementById('stageList'),
+        detectionProgressFill: document.getElementById('detectionProgressFill'),
+        detectionDetail: document.getElementById('detectionDetail'),
+        killCount: document.getElementById('killCount'),
+        clipCount: document.getElementById('clipCount'),
+        // Error elements
+        errorLog: document.getElementById('errorLog'),
+        errorCount: document.getElementById('errorCount')
     };
 
     // --- Initialization ---
@@ -35,8 +52,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function init() {
         fetchGames();
         setupEventListeners();
-        
-        // Check if there's an existing task running
         checkTaskStatus();
         startStatusPolling();
     }
@@ -62,7 +77,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         elements.startBtn.addEventListener('click', startTask);
         elements.cancelBtn.addEventListener('click', cancelTask);
-        elements.clearLogsBtn.addEventListener('click', clearLogs);
     }
 
     // --- API Calls ---
@@ -110,12 +124,17 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             
             const data = await response.json();
-            state.videos = data.videos || [];
-            renderVideoList();
+            
+            if (data.error) {
+                showToast(data.error, 'error');
+            } else {
+                state.videos = data.videos || [];
+                renderVideoList();
+            }
             
         } catch (error) {
             console.error('Scan failed:', error);
-            showToast('扫描目录失败: ' + error.message, 'error');
+            showToast('扫描目录失败', 'error');
         } finally {
             elements.scanBtn.disabled = false;
             elements.scanBtn.innerHTML = '<span class="icon">🔍</span> 扫描';
@@ -128,25 +147,24 @@ document.addEventListener('DOMContentLoaded', () => {
         const game = elements.gameSelect.value;
         const videos = Array.from(state.selectedVideos);
         
-        // Clear previous state
-        clearLogs();
+        // Reset progress display
+        resetProgressDisplay();
         setTaskStatus('running');
+        state.errorIndex = 0;
+        elements.errorLog.innerHTML = '';
+        updateErrorCount(0);
 
         try {
             const response = await fetch('/api/task/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    game: game,
-                    videos: videos 
-                })
+                body: JSON.stringify({ game, videos })
             });
             
             const data = await response.json();
             
             if (data.success) {
                 showToast('任务已启动', 'success');
-                startLogPolling();
             } else {
                 setTaskStatus('failed');
                 showToast('启动失败: ' + (data.error || '未知错误'), 'error');
@@ -165,7 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             
             if (data.success) {
-                addLogEntry({ level: 'WARNING', message: '用户请求取消任务...', time: new Date().toLocaleTimeString() });
+                showToast('任务已取消', 'warning');
             }
         } catch (error) {
             showToast('取消请求失败', 'error');
@@ -177,22 +195,37 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch('/api/task/status');
             const data = await response.json();
             
-            // If status changed or initializing
+            // Update status if changed
             if (state.taskStatus !== data.status) {
                 setTaskStatus(data.status);
-                
-                // If we just found a running task, start logging
-                if (data.status === 'running' && !state.logPollingInterval) {
-                    startLogPolling();
-                }
             }
             
-            if (data.status === 'completed' || data.status === 'failed') {
-                stopLogPolling();
+            // Update progress display
+            if (data.progress) {
+                updateProgressDisplay(data.progress);
+            }
+            
+            // Fetch errors if running
+            if (data.status === 'running') {
+                fetchErrors();
             }
             
         } catch (error) {
             console.warn('Status check failed:', error);
+        }
+    }
+
+    async function fetchErrors() {
+        try {
+            const response = await fetch(`/api/task/errors?since=${state.errorIndex}`);
+            const data = await response.json();
+            
+            if (data.errors && data.errors.length > 0) {
+                data.errors.forEach(addErrorEntry);
+                state.errorIndex = data.next_index;
+            }
+        } catch (error) {
+            console.warn('Error fetch failed:', error);
         }
     }
 
@@ -226,10 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     state.selectedVideos.delete(video.path);
                 }
                 updateSelectionUI();
-                
-                // Update "Select All" state
-                const allChecked = state.videos.length === state.selectedVideos.size;
-                elements.selectAll.checked = allChecked;
+                elements.selectAll.checked = state.videos.length === state.selectedVideos.size;
             });
 
             const info = document.createElement('div');
@@ -250,7 +280,6 @@ document.addEventListener('DOMContentLoaded', () => {
             item.appendChild(checkbox);
             item.appendChild(info);
             
-            // Click on row toggles checkbox
             item.addEventListener('click', (e) => {
                 if (e.target !== checkbox) {
                     checkbox.click();
@@ -267,8 +296,6 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateSelectionUI() {
         const count = state.selectedVideos.size;
         elements.selectedCount.textContent = count;
-        
-        // Enable start button if at least one video is selected AND no task is running
         const isRunning = state.taskStatus === 'running';
         elements.startBtn.disabled = count === 0 || isRunning;
     }
@@ -278,17 +305,14 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const isRunning = status === 'running';
         
-        // Update Start Button
         elements.startBtn.disabled = isRunning || state.selectedVideos.size === 0;
         
-        // Update Cancel Button
         if (isRunning) {
             elements.cancelBtn.classList.remove('hidden');
         } else {
             elements.cancelBtn.classList.add('hidden');
         }
 
-        // Update Inputs
         elements.gameSelect.disabled = isRunning;
         elements.dirInput.disabled = isRunning;
         elements.scanBtn.disabled = isRunning;
@@ -296,95 +320,102 @@ document.addEventListener('DOMContentLoaded', () => {
         checkboxes.forEach(cb => cb.disabled = isRunning);
         elements.selectAll.disabled = isRunning;
 
-        // Update Status Text
         const statusMap = {
             'idle': { text: '空闲', color: '#94a3b8' },
             'running': { text: '⏳ 处理中...', color: '#00d9ff' },
             'completed': { text: '✅ 已完成', color: '#4ade80' },
-            'failed': { text: '❌ 失败', color: '#f87171' }
+            'failed': { text: '❌ 失败', color: '#f87171' },
+            'cancelled': { text: '⚠️ 已取消', color: '#fbbf24' }
         };
         
         const info = statusMap[status] || statusMap['idle'];
         elements.taskStatusText.innerHTML = `状态: <span style="color:${info.color}">${info.text}</span>`;
         
-        // Update Global Status Indicator
         elements.statusDot.style.backgroundColor = info.color;
         elements.statusDot.style.boxShadow = `0 0 8px ${info.color}`;
         elements.statusText.textContent = isRunning ? '系统忙碌' : '系统就绪';
     }
 
-    // --- Logging System ---
+    function resetProgressDisplay() {
+        elements.currentVideoInfo.innerHTML = '<div class="video-label">准备中...</div>';
+        
+        STAGES.forEach(stage => {
+            const el = document.querySelector(`.stage-item[data-stage="${stage.id}"]`);
+            if (el) {
+                el.className = 'stage-item';
+                el.querySelector('.stage-icon').textContent = '⬜';
+            }
+        });
+        
+        elements.detectionProgressFill.style.width = '0%';
+        elements.detectionDetail.textContent = '';
+        elements.killCount.textContent = '0';
+        elements.clipCount.textContent = '0';
+    }
+
+    function updateProgressDisplay(progress) {
+        // Update current video info
+        if (progress.current_video) {
+            let html = `<div class="video-label">${escapeHtml(progress.current_video)}</div>`;
+            if (progress.total_videos > 1) {
+                html += `<div class="video-counter">(${progress.current_video_index}/${progress.total_videos})</div>`;
+            }
+            elements.currentVideoInfo.innerHTML = html;
+        }
+        
+        // Update stages
+        const stages = progress.stages || {};
+        STAGES.forEach(stage => {
+            const el = document.querySelector(`.stage-item[data-stage="${stage.id}"]`);
+            if (!el) return;
+            
+            const status = stages[stage.id] || 'pending';
+            el.className = `stage-item ${status}`;
+            
+            let icon = '⬜';
+            if (status === 'success') icon = '✅';
+            else if (status === 'running') icon = '⏳';
+            else if (status === 'failed') icon = '❌';
+            else if (status === 'skipped') icon = '⏭️';
+            
+            el.querySelector('.stage-icon').textContent = icon;
+        });
+        
+        // Update detection progress
+        if (progress.detection_total > 0) {
+            const percent = Math.min(100, Math.round((progress.detection_progress / progress.detection_total) * 100));
+            elements.detectionProgressFill.style.width = `${percent}%`;
+            elements.detectionDetail.textContent = `${progress.detection_progress}/${progress.detection_total}`;
+        }
+        
+        // Update stats
+        elements.killCount.textContent = progress.detected_kills || 0;
+        elements.clipCount.textContent = progress.extracted_clips || 0;
+    }
+
+    function addErrorEntry(error) {
+        const div = document.createElement('div');
+        div.className = `error-entry ${error.level === 'WARNING' ? 'warning' : ''}`;
+        div.innerHTML = `
+            <span class="time">[${error.time || '??:??:??'}]</span>
+            <span>${escapeHtml(error.message)}</span>
+        `;
+        elements.errorLog.appendChild(div);
+        elements.errorLog.scrollTop = elements.errorLog.scrollHeight;
+        
+        updateErrorCount(elements.errorLog.children.length);
+    }
+
+    function updateErrorCount(count) {
+        elements.errorCount.textContent = count;
+        elements.errorCount.className = `error-count ${count === 0 ? 'zero' : ''}`;
+    }
+
+    // --- Polling ---
 
     function startStatusPolling() {
         if (state.statusPollingInterval) clearInterval(state.statusPollingInterval);
-        state.statusPollingInterval = setInterval(checkTaskStatus, 2000);
-    }
-
-    function startLogPolling() {
-        if (state.logPollingInterval) clearInterval(state.logPollingInterval);
-        
-        // Initial poll immediately
-        pollLogs();
-        
-        state.logPollingInterval = setInterval(pollLogs, 1000);
-    }
-
-    function stopLogPolling() {
-        if (state.logPollingInterval) {
-            clearInterval(state.logPollingInterval);
-            state.logPollingInterval = null;
-            // One final poll to get remaining logs
-            pollLogs();
-        }
-    }
-
-    async function pollLogs() {
-        try {
-            const response = await fetch(`/api/task/logs?poll=true&since=${state.logIndex}`);
-            const data = await response.json();
-            
-            if (data.logs && data.logs.length > 0) {
-                data.logs.forEach(addLogEntry);
-                state.logIndex = data.next_index;
-            }
-            
-            // If the server says task is done, ensure we stop polling eventually
-            if (data.status !== 'running' && state.logPollingInterval) {
-                // Let the status poller handle the final state switch
-            }
-            
-        } catch (error) {
-            console.error('Log poll failed:', error);
-        }
-    }
-
-    function addLogEntry(log) {
-        const div = document.createElement('div');
-        
-        // Map log level to CSS class
-        let levelClass = 'log-info';
-        if (log.level === 'ERROR' || log.level === 'CRITICAL') levelClass = 'log-error';
-        else if (log.level === 'WARNING') levelClass = 'log-warning';
-        else if (log.level === 'DEBUG') levelClass = 'log-debug';
-        
-        div.className = `log-entry ${levelClass}`;
-        
-        // Format: [14:30:05] [INFO] Message...
-        div.innerHTML = `
-            <span class="time">[${log.time || '??:??:??'}]</span>
-            <span class="msg">${escapeHtml(log.message)}</span>
-        `;
-        
-        elements.logContainer.appendChild(div);
-        
-        // Auto scroll to bottom
-        elements.logContainer.scrollTop = elements.logContainer.scrollHeight;
-    }
-
-    function clearLogs() {
-        elements.logContainer.innerHTML = '';
-        state.logIndex = 0;
-        addLogEntry({ level: 'INFO', message: '日志已清空', time: new Date().toLocaleTimeString() });
+        state.statusPollingInterval = setInterval(checkTaskStatus, 1000);
     }
 
     // --- Utilities ---
@@ -403,7 +434,6 @@ document.addEventListener('DOMContentLoaded', () => {
         
         container.appendChild(toast);
         
-        // Remove after 3 seconds
         setTimeout(() => {
             toast.style.opacity = '0';
             toast.style.transform = 'translateX(100%)';

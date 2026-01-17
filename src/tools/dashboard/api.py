@@ -20,7 +20,6 @@ VIDEO_EXTENSIONS = {'.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.webm'}
 def list_games():
     """List available game configurations."""
     try:
-        # Get project root
         base_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.abspath(os.path.join(base_dir, "..", "..", ".."))
         games_dir = os.path.join(project_root, "config", "games")
@@ -42,21 +41,7 @@ def list_games():
 
 @api_bp.route("/scan", methods=["POST"])
 def scan_directory():
-    """
-    Scan a directory for video files.
-    
-    Request body:
-    {
-        "directory": "D:\\videos\\gameplay"
-    }
-    
-    Response:
-    {
-        "videos": [
-            {"path": "...", "name": "...", "size": 1234567, "size_formatted": "1.2 GB"}
-        ]
-    }
-    """
+    """Scan a directory for video files."""
     data = request.json or {}
     directory = data.get("directory", "").strip()
     
@@ -86,7 +71,6 @@ def scan_directory():
                 except OSError:
                     continue
         
-        # Sort by name
         videos.sort(key=lambda v: v["name"].lower())
         
         return jsonify({
@@ -112,15 +96,7 @@ def _format_size(size_bytes: int) -> str:
 
 @api_bp.route("/task/start", methods=["POST"])
 def start_task():
-    """
-    Start a video processing task.
-    
-    Request body:
-    {
-        "videos": ["D:\\video1.mp4", "D:\\video2.mp4"],
-        "game": "battlefield6"
-    }
-    """
+    """Start a video processing task."""
     data = request.json or {}
     videos = data.get("videos", [])
     game = data.get("game", "battlefield6")
@@ -141,7 +117,7 @@ def start_task():
 
 @api_bp.route("/task/status", methods=["GET"])
 def get_task_status():
-    """Get current task status."""
+    """Get current task status with progress information."""
     status = task_manager.get_status()
     return jsonify(status)
 
@@ -164,56 +140,20 @@ def clear_task():
     return jsonify({"success": True, "message": "Task cleared"})
 
 
-@api_bp.route("/task/logs", methods=["GET"])
-def get_logs_sse():
+@api_bp.route("/task/errors", methods=["GET"])
+def get_errors():
     """
-    Server-Sent Events endpoint for log streaming.
+    Get error/warning logs.
     
     Query params:
-    - poll: if "true", use polling mode instead of SSE (returns JSON array)
-    - since: log index to start from (for polling)
+    - since: error index to start from (default: 0)
     """
-    poll_mode = request.args.get("poll", "false").lower() == "true"
+    since = int(request.args.get("since", 0))
+    errors = task_manager.get_errors(since)
+    status = task_manager.get_status()
     
-    if poll_mode:
-        # Polling mode: return logs as JSON
-        since = int(request.args.get("since", 0))
-        logs = task_manager.get_logs(since)
-        status = task_manager.get_status()
-        return jsonify({
-            "logs": logs,
-            "next_index": since + len(logs),
-            "status": status["status"]
-        })
-    
-    # SSE mode
-    def generate():
-        last_index = 0
-        
-        while True:
-            # Get new logs
-            logs = task_manager.get_logs(last_index)
-            
-            for log in logs:
-                data = json.dumps(log)
-                yield f"data: {data}\n\n"
-                last_index += 1
-            
-            # Check if task is still running
-            status = task_manager.get_status()
-            if status["status"] not in (TaskStatus.RUNNING.value, "running"):
-                # Send final status event
-                yield f"event: done\ndata: {json.dumps(status)}\n\n"
-                break
-            
-            time.sleep(0.2)
-    
-    return Response(
-        generate(),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-    )
+    return jsonify({
+        "errors": errors,
+        "next_index": since + len(errors),
+        "status": status["status"]
+    })

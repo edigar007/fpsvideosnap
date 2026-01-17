@@ -80,20 +80,72 @@
                 </div>
             </section>
 
-            <!-- Right Column: Logs & Status -->
-            <section class="panel log-panel">
+            <!-- Right Column: Progress & Errors -->
+            <section class="panel progress-panel">
                 <div class="panel-header">
-                    <h2>执行日志</h2>
-                    <div class="panel-actions">
-                        <button id="clearLogsBtn" class="btn btn-xs btn-outline">清空</button>
+                    <h2>📊 处理进度</h2>
+                </div>
+                
+                <!-- Progress Display -->
+                <div class="progress-content" id="progressContent">
+                    <!-- Current Video Info -->
+                    <div class="current-video-info" id="currentVideoInfo">
+                        <div class="video-label">等待开始...</div>
+                    </div>
+                    
+                    <!-- Stage List -->
+                    <div class="stage-list" id="stageList">
+                        <div class="stage-item" data-stage="metadata">
+                            <span class="stage-icon">⬜</span>
+                            <span class="stage-name">视频元数据</span>
+                        </div>
+                        <div class="stage-item" data-stage="frames">
+                            <span class="stage-icon">⬜</span>
+                            <span class="stage-name">帧提取</span>
+                        </div>
+                        <div class="stage-item" data-stage="detection">
+                            <span class="stage-icon">⬜</span>
+                            <span class="stage-name">击杀检测</span>
+                            <div class="stage-progress-bar">
+                                <div class="stage-progress-fill" id="detectionProgressFill"></div>
+                            </div>
+                            <span class="stage-detail" id="detectionDetail"></span>
+                        </div>
+                        <div class="stage-item" data-stage="clips">
+                            <span class="stage-icon">⬜</span>
+                            <span class="stage-name">片段提取</span>
+                        </div>
+                        <div class="stage-item" data-stage="join">
+                            <span class="stage-icon">⬜</span>
+                            <span class="stage-name">视频拼接</span>
+                        </div>
+                        <div class="stage-item" data-stage="audio">
+                            <span class="stage-icon">⬜</span>
+                            <span class="stage-name">音频混合</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Stats -->
+                    <div class="stats-row">
+                        <div class="stat-item">
+                            <span class="stat-value" id="killCount">0</span>
+                            <span class="stat-label">检测到的击杀</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="clipCount">0</span>
+                            <span class="stat-label">提取的片段</span>
+                        </div>
                     </div>
                 </div>
                 
-                <div class="log-viewport" id="logContainer">
-                    <!-- Logs will appear here -->
-                    <div class="log-entry log-info">
-                        <span class="time">[SYSTEM]</span>
-                        <span class="msg">等待任务启动...</span>
+                <!-- Error Log (collapsed by default, shows only errors) -->
+                <div class="error-section">
+                    <div class="error-header" id="errorHeader">
+                        <span>⚠️ 错误日志</span>
+                        <span class="error-count" id="errorCount">0</span>
+                    </div>
+                    <div class="error-log" id="errorLog">
+                        <!-- Errors will appear here -->
                     </div>
                 </div>
 
