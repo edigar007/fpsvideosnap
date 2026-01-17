@@ -11,8 +11,9 @@ def parse_args():
     run_parser.add_argument(
         "--video", 
         type=str, 
+        nargs='+',
         required=True, 
-        help="Path to the input gameplay video"
+        help="Path(s) to input gameplay video(s). Multiple files will be merged into one highlight."
     )
     
     run_parser.add_argument(

@@ -470,6 +470,170 @@ class Pipeline:
             
             return False
 
+    def run_until_clips(self, video_path: str) -> List[Dict[str, Any]]:
+        """
+        Runs the pipeline only until clips extraction (skips join/audio/report).
+        Used for multi-video merge mode where clips are collected and joined later.
+        
+        Returns:
+            List of extracted clip metadata dicts with 'path' field.
+        """
+        video_path = os.path.abspath(video_path)
+        base_name = os.path.splitext(os.path.basename(video_path))[0]
+        
+        # Ensure temp directory exists
+        checkpoint_dir = self.config.get("global", {}).get("temp_dir", "temp")
+        if not os.path.exists(checkpoint_dir):
+            os.makedirs(checkpoint_dir, exist_ok=True)
+        
+        self.checkpoint_file = os.path.join(checkpoint_dir, f"checkpoint_{base_name}.json")
+        
+        try:
+            # 1. Metadata
+            self._update_stage("metadata", StageStatus.RUNNING)
+            self.video_info = VideoInfo(video_path)
+            self.results["video_info"] = {
+                "path": video_path,
+                "duration": self.video_info.duration,
+                "resolution": f"{self.video_info.width}x{self.video_info.height}",
+                "fps": self.video_info.fps
+            }
+            self._update_stage("metadata", StageStatus.SUCCESS)
+            
+            # 2. Frame Extraction
+            frame_dir = os.path.join(self.temp_dir, "frames")
+            self._update_stage("frames", StageStatus.RUNNING)
+            profiler.start('stage_frame_extraction')
+            extractor = FrameExtractor(
+                ffmpeg_path=self.config.get("video", {}).get("ffmpeg_path", "ffmpeg"),
+                hwaccel=self.config.get("video", {}).get("hwaccel", "cuda"),
+                mode=self.config.get("video", {}).get("frame_extraction_mode", "bulk"),
+            )
+            interval = self.config.get("video", {}).get("frame_interval_ms", 1000)
+            frames = extractor.extract_frames(video_path, frame_dir, interval_ms=interval)
+            self.results["frames"] = frames
+            profiler.end('stage_frame_extraction')
+            self._update_stage("frames", StageStatus.SUCCESS)
+
+            # 3. Kill Detection
+            self._update_stage("detection", StageStatus.RUNNING)
+            profiler.start('stage_detection_total')
+            
+            # Setup AI components
+            profiler.start('stage_detection_setup')
+            model_dir = self.config.get("ai", {}).get("model_dir", "models")
+            model_path = os.path.join(model_dir, "yolov8n.pt")
+            self.model_manager.model_path = model_path
+            yolo_model = self.model_manager.load_model()
+            
+            batch_size = self.config.get("ai", {}).get("batch_size", 16)
+            yolo_detector = YoloDetector(yolo_model, batch_size=batch_size)
+            opencv_matcher = OpenCVMatcher(self.config)
+            
+            template_dir = self.config.get("detection", {}).get("template_dir", "")
+            if template_dir and os.path.exists(template_dir):
+                opencv_matcher.load_templates(template_dir)
+            
+            kill_detector = KillDetector(yolo_detector, opencv_matcher, self.config)
+            profiler.end('stage_detection_setup')
+            
+            # Setup TimestampRecorder
+            history_dir = self.config.get("global", {}).get("history_dir", "history")
+            run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            run_dir = os.path.join(history_dir, f"run_{run_timestamp}")
+            os.makedirs(run_dir, exist_ok=True)
+            
+            detection_json_path = os.path.join(run_dir, "detections.json")
+            timestamp_recorder = TimestampRecorder(detection_json_path)
+            
+            detected_events = []
+            import cv2
+            
+            pbar = create_progress_bar(total=len(frames), desc=f"Detecting [{base_name}]")
+            chunk_size = 256
+            
+            profiler.start('stage_detection_processing')
+            for i in range(0, len(frames), chunk_size):
+                chunk_paths = frames[i:i + chunk_size]
+                chunk_frames = []
+                chunk_timestamps = []
+                
+                profiler.start('stage_detection_read_frames')
+                for frame_path in chunk_paths:
+                    frame = cv2.imread(frame_path)
+                    if frame is not None:
+                        chunk_frames.append(frame)
+                        try:
+                            ts_str = os.path.basename(frame_path).split('_')[1].split('.')[0]
+                            chunk_timestamps.append(int(ts_str))
+                        except:
+                            chunk_timestamps.append(0)
+                profiler.end('stage_detection_read_frames')
+
+                if chunk_frames:
+                    batch_events = kill_detector.process_video_batch(chunk_frames, chunk_timestamps)
+                    detected_events.extend(batch_events)
+                    
+                    profiler.start('stage_detection_record_events')
+                    for event in batch_events:
+                        timestamp_recorder.record_event(
+                            timestamp_ms=event.get("timestamp_ms", 0),
+                            event_type="kill",
+                            confidence=event.get("confidence", 0.0),
+                            meta={"signals": event.get("signals", {})}
+                        )
+                    profiler.end('stage_detection_record_events')
+                
+                pbar.update(len(chunk_paths))
+            
+            profiler.end('stage_detection_processing')
+            pbar.close()
+            
+            timestamp_recorder.save()
+            profiler.end('stage_detection_total')
+            
+            logger.info(f"[bold]{base_name}:[/bold] Detected {len(detected_events)} events")
+            
+            self.results["events"] = detected_events
+            self.results["detection_json"] = detection_json_path
+            self._update_stage("detection", StageStatus.SUCCESS)
+            
+            # Release OCR resources
+            try:
+                if getattr(kill_detector, "ocr", None) is not None:
+                    kill_detector.ocr.close()
+            except Exception:
+                pass
+
+            # 4. Clip Extraction
+            clip_dir = os.path.join(self.temp_dir, "clips")
+            extracted_clips = []
+            if not detected_events:
+                logger.warning(f"{base_name}: No kills detected. Skipping clip extraction.")
+                self._update_stage("clips", StageStatus.SKIPPED)
+                self.results["clips"] = []
+            else:
+                self._update_stage("clips", StageStatus.RUNNING)
+                clip_extractor = ClipExtractor(self.config)
+                
+                detection_json = self.results.get("detection_json")
+                if detection_json and os.path.exists(detection_json):
+                    extracted_clips = clip_extractor.extract_from_json(video_path, detection_json, clip_dir)
+                else:
+                    extracted_clips = clip_extractor.extract_clips(video_path, detected_events, clip_dir)
+                
+                self.results["clips"] = extracted_clips
+                self._update_stage("clips", StageStatus.SUCCESS)
+            
+            logger.info(f"[bold green]{base_name}:[/bold green] Extracted {len(extracted_clips)} clips")
+            return extracted_clips
+
+        except Exception as e:
+            logger.error(f"Pipeline failed for {video_path}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return []
+
     def _get_current_stage(self) -> str:
         for name, stage in self.stages.items():
             if stage.status == StageStatus.RUNNING:
