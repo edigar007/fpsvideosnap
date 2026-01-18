@@ -105,6 +105,15 @@ handleMouseDown(e) {
         const pos = this.clientToCanvas(e.clientX, e.clientY);
         const relPos = { x: pos.x / this.canvas.width, y: pos.y / this.canvas.height };
 
+        // Debug logging
+        console.log('[MouseDown] clientX:', e.clientX, 'clientY:', e.clientY);
+        console.log('[MouseDown] canvas pos:', pos.x, pos.y);
+        console.log('[MouseDown] relPos:', relPos.x, relPos.y);
+        console.log('[MouseDown] canvas.width:', this.canvas.width, 'canvas.height:', this.canvas.height);
+        console.log('[MouseDown] scale:', this.scale);
+        const rect = this.canvas.getBoundingClientRect();
+        console.log('[MouseDown] getBoundingClientRect:', rect.left, rect.top, rect.width, rect.height);
+
         if (this.mode === 'ROI') {
             this.dragging = true;
             this.startPos = relPos;  // Store as relative coordinates (0-1)
@@ -198,17 +207,12 @@ handleMouseMove(e) {
      * Convert client coordinates (mouse) to canvas pixel coordinates
      */
     clientToCanvas(clientX, clientY) {
-        // Get the viewport (scrollable container)
-        const container = document.getElementById('canvas-viewport');
-        const containerRect = container.getBoundingClientRect();
+        // getBoundingClientRect() handles transform, scroll, and positioning automatically
+        const rect = this.canvas.getBoundingClientRect();
 
-        // Calculate position relative to viewport, accounting for scroll offset
-        const viewportX = clientX - containerRect.left + container.scrollLeft;
-        const viewportY = clientY - containerRect.top + container.scrollTop;
-
-        // Convert to canvas coordinates, accounting for scale
-        const x = viewportX / this.scale;
-        const y = viewportY / this.scale;
+        // Calculate position relative to canvas (accounts for transform scale)
+        const x = (clientX - rect.left) / this.scale;
+        const y = (clientY - rect.top) / this.scale;
 
         return { x, y };
     }
