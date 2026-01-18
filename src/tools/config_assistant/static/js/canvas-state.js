@@ -194,13 +194,22 @@ handleMouseMove(e) {
         this.canvas.style.transform = `scale(${this.scale})`;
     }
 
-    /**
+/**
      * Convert client coordinates (mouse) to canvas pixel coordinates
      */
     clientToCanvas(clientX, clientY) {
-        const rect = this.canvas.getBoundingClientRect();
-        const x = (clientX - rect.left) / this.scale;
-        const y = (clientY - rect.top) / this.scale;
+        // Get the viewport (scrollable container)
+        const container = document.getElementById('canvas-viewport');
+        const containerRect = container.getBoundingClientRect();
+
+        // Calculate position relative to viewport, accounting for scroll offset
+        const viewportX = clientX - containerRect.left + container.scrollLeft;
+        const viewportY = clientY - containerRect.top + container.scrollTop;
+
+        // Convert to canvas coordinates, accounting for scale
+        const x = viewportX / this.scale;
+        const y = viewportY / this.scale;
+
         return { x, y };
     }
 
