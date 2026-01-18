@@ -100,37 +100,37 @@ class CanvasState {
         };
     }
 
-    handleMouseDown(e) {
+handleMouseDown(e) {
         if (!this.image) return;
         const pos = this.clientToCanvas(e.clientX, e.clientY);
         const relPos = { x: pos.x / this.canvas.width, y: pos.y / this.canvas.height };
-        
+
         if (this.mode === 'ROI') {
             this.dragging = true;
-            this.startPos = pos;
+            this.startPos = relPos;  // Store as relative coordinates (0-1)
             this.roi = [relPos.x, relPos.y, 0, 0];
         } else if (this.mode === 'TEMPLATE' && this.roi) {
             if (this.isPosInROI(relPos.x, relPos.y)) {
                 this.dragging = true;
-                this.startPos = pos;
+                this.startPos = relPos;  // Store as relative coordinates (0-1)
                 const inner = this.getRelToROI(relPos.x, relPos.y);
                 this.subRoi = [inner.x, inner.y, 0, 0];
             }
         }
     }
 
-    handleMouseMove(e) {
+handleMouseMove(e) {
         if (!this.image) return;
         const pos = this.clientToCanvas(e.clientX, e.clientY);
         const relPos = { x: pos.x / this.canvas.width, y: pos.y / this.canvas.height };
 
         if (this.dragging) {
             if (this.mode === 'ROI') {
-                const x = Math.min(relPos.x, this.startPos.x / this.canvas.width);
-                const y = Math.min(relPos.y, this.startPos.y / this.canvas.height);
-                const w = Math.abs(relPos.x - this.startPos.x / this.canvas.width);
-                const h = Math.abs(relPos.y - this.startPos.y / this.canvas.height);
-                
+                const x = Math.min(relPos.x, this.startPos.x);
+                const y = Math.min(relPos.y, this.startPos.y);
+                const w = Math.abs(relPos.x - this.startPos.x);
+                const h = Math.abs(relPos.y - this.startPos.y);
+
                 this.roi = [x, y, w, h];
                 document.dispatchEvent(new CustomEvent('roiChanged', { detail: { roi: this.roi } }));
                 this.render();
@@ -139,15 +139,15 @@ class CanvasState {
                 // Clamp relPos to ROI boundaries
                 const clampedX = Math.max(rx, Math.min(rx + rw, relPos.x));
                 const clampedY = Math.max(ry, Math.min(ry + rh, relPos.y));
-                
-                const startInner = this.getRelToROI(this.startPos.x / this.canvas.width, this.startPos.y / this.canvas.height);
+
+                const startInner = this.getRelToROI(this.startPos.x, this.startPos.y);
                 const currentInner = this.getRelToROI(clampedX, clampedY);
-                
+
                 const x = Math.min(startInner.x, currentInner.x);
                 const y = Math.min(startInner.y, currentInner.y);
                 const w = Math.abs(currentInner.x - startInner.x);
                 const h = Math.abs(currentInner.y - startInner.y);
-                
+
                 this.subRoi = [x, y, w, h];
                 document.dispatchEvent(new CustomEvent('subRoiChanged', { detail: { subRoi: this.subRoi } }));
                 this.render();
@@ -215,8 +215,14 @@ class CanvasState {
         };
     }
 
-    setImage(img) {
+setImage(img) {
         this.image = img;
+        // Reset ROI when image changes because old ROI coordinates
+        // might not be meaningful on a different image
+        this.roi = null;
+        this.subRoi = null;
+        this.tempHighlights = [];
+        this.colorMask = null;
         this.resetView();
     }
 
