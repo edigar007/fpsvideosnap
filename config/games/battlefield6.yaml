@@ -1,4 +1,6 @@
 game_name: battlefield6
+global:
+  output_dir: "G:/Video/Battlefield 6/my_highlights"
 detection:
   ocr:
     enabled: true
