@@ -249,7 +249,7 @@ body {
 .canvas-viewport {
     flex: 1;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     overflow: auto;
     position: relative;
