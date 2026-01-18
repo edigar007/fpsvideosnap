@@ -255,6 +255,14 @@ body {
     position: relative;
 }
 
+/* Ensure canvas is positioned correctly at the top */
+.canvas-viewport #main-canvas {
+    margin-top: 0;
+    margin-left: auto;
+    margin-right: auto;
+    flex-shrink: 0;
+}
+
 .config-tabs-panel {
     width: var(--tabs-width);
     display: flex;

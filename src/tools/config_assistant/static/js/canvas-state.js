@@ -105,15 +105,6 @@ handleMouseDown(e) {
         const pos = this.clientToCanvas(e.clientX, e.clientY);
         const relPos = { x: pos.x / this.canvas.width, y: pos.y / this.canvas.height };
 
-        // Debug logging
-        console.log('[MouseDown] clientX:', e.clientX, 'clientY:', e.clientY);
-        console.log('[MouseDown] canvas pos:', pos.x, pos.y);
-        console.log('[MouseDown] relPos:', relPos.x, relPos.y);
-        console.log('[MouseDown] canvas.width:', this.canvas.width, 'canvas.height:', this.canvas.height);
-        console.log('[MouseDown] scale:', this.scale);
-        const rect = this.canvas.getBoundingClientRect();
-        console.log('[MouseDown] getBoundingClientRect:', rect.left, rect.top, rect.width, rect.height);
-
         if (this.mode === 'ROI') {
             this.dragging = true;
             this.startPos = relPos;  // Store as relative coordinates (0-1)
