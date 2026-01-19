@@ -184,9 +184,11 @@ handleMouseMove(e) {
         }
     }
 
-    adjustZoom(delta) {
+adjustZoom(delta) {
         this.scale = Math.max(0.1, Math.min(5.0, this.scale + delta));
         this.updateZoomDisplay();
+        // Re-render to update overlays (ROI) with correct scale
+        this.render();
     }
 
     updateZoomDisplay() {
