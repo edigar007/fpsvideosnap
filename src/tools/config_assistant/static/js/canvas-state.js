@@ -197,15 +197,26 @@ adjustZoom(delta) {
     }
 
 /**
-     * Convert client coordinates (mouse) to canvas pixel coordinates
+     * Convert client coordinates (mouse) to canvas pixel coordinates.
+     * Uses the actual rendered size (from getBoundingClientRect) to compute
+     * the correct ratio, rather than relying on this.scale which may diverge
+     * from the true CSS-rendered dimensions.
      */
     clientToCanvas(clientX, clientY) {
-        // getBoundingClientRect() handles transform, scroll, and positioning automatically
         const rect = this.canvas.getBoundingClientRect();
 
-        // Calculate position relative to canvas (accounts for transform scale)
-        const x = (clientX - rect.left) / this.scale;
-        const y = (clientY - rect.top) / this.scale;
+        // rect.width/height = visual (CSS-transformed) size
+        // canvas.width/height = intrinsic pixel size
+        // Ratio converts mouse position to canvas pixel coordinates
+        const scaleX = this.canvas.width / rect.width;
+        const scaleY = this.canvas.height / rect.height;
+
+        let x = (clientX - rect.left) * scaleX;
+        let y = (clientY - rect.top) * scaleY;
+
+        // Clamp to canvas bounds to handle edge dragging
+        x = Math.max(0, Math.min(this.canvas.width, x));
+        y = Math.max(0, Math.min(this.canvas.height, y));
 
         return { x, y };
     }
