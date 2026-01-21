@@ -7,13 +7,18 @@ from src.utils.logger import get_logger
 
 logger = get_logger("config_assistant.ocr_service")
 
+
+class OCRUnavailableError(Exception):
+    """Raised when OCR service is not available."""
+    pass
+
+
 class OCRService:
     """
     Service layer for OCR operations in the Config Assistant.
     Provides text detection and caching for better performance.
     """
     _instance = None
-    _detector = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -21,19 +26,43 @@ class OCRService:
         return cls._instance
 
     def __init__(self):
-        # Only initialize once
-        if self._detector is None:
-            logger.info("Initializing OCR Service...")
-            try:
-                # Default to Chinese/English and GPU if available
-                self._detector = OCRDetector(lang='ch', use_gpu=True)
-                logger.info("OCR Detector initialized successfully.")
-            except Exception as e:
-                logger.error(f"Failed to initialize OCR Detector: {e}")
-                self._detector = None
-            
+        # Only initialize once (prevent re-init on singleton reuse)
+        if not hasattr(self, '_initialized'):
+            self._detector = None
+            self._initialized = False
+            self._init_error: Optional[str] = None
             # Simple cache: (image_path, mtime, roi_tuple) -> results
             self._cache = {}
+
+    def _ensure_initialized(self) -> None:
+        """
+        Lazy initialization of OCR detector.
+        Called on first use rather than at import time.
+        """
+        if self._initialized:
+            return
+        
+        self._initialized = True
+        logger.info("Initializing OCR Service...")
+        
+        try:
+            # Default to Chinese/English and GPU if available
+            # Use force_subprocess=True on Windows to avoid DLL conflicts
+            import sys
+            force_subprocess = sys.platform == 'win32'
+            self._detector = OCRDetector(lang='ch', use_gpu=True, force_subprocess=force_subprocess)
+            logger.info("OCR Detector initialized successfully.")
+        except OSError as e:
+            # Handle DLL/CUDA errors specially
+            if "WinError 127" in str(e) or "DLL" in str(e):
+                self._init_error = "PaddleOCR unavailable: CUDA/cuDNN DLL not found. Use .venv_paddle environment."
+                logger.warning(self._init_error)
+            else:
+                self._init_error = f"OCR initialization failed: {e}"
+                logger.warning(self._init_error)
+        except Exception as e:
+            self._init_error = f"OCR initialization failed: {e}"
+            logger.warning(self._init_error)
 
     def detect(self, image_path: str, roi: Optional[List[float]] = None) -> List[Dict]:
         """
@@ -46,9 +75,11 @@ class OCRService:
         Returns:
             List of detected items: [{'text': str, 'confidence': float, 'bbox': List[List[int]]}]
         """
+        # Ensure OCR is initialized before use
+        self._ensure_initialized()
+        
         if self._detector is None:
-            logger.error("OCR Detector not available.")
-            return []
+            raise OCRUnavailableError(self._init_error or "OCR not initialized")
 
         if not os.path.exists(image_path):
             logger.error(f"Image path does not exist: {image_path}")
@@ -105,5 +136,17 @@ class OCRService:
             logger.error(f"Error during OCR detection: {e}")
             return []
 
-# Global instance for easy access
-ocr_service = OCRService()
+# Singleton accessor with lazy instantiation
+_ocr_service_instance: Optional[OCRService] = None
+
+
+def get_ocr_service() -> OCRService:
+    """
+    Get the singleton OCRService instance.
+    Creates the instance on first call (lazy initialization).
+    """
+    global _ocr_service_instance
+    if _ocr_service_instance is None:
+        _ocr_service_instance = OCRService()
+    return _ocr_service_instance
+

@@ -5,7 +5,10 @@ import pytest
 import yaml
 from PIL import Image
 from src.tools.config_assistant.server import create_app
-from src.tools.config_assistant.api import CONFIG_GAMES_DIR, TEMPLATE_ROOT
+from src.tools.config_assistant.config_manager import config_manager
+
+CONFIG_GAMES_DIR = config_manager.games_dir
+TEMPLATE_ROOT = os.path.join(config_manager.project_root, "models", "templates")
 
 @pytest.fixture
 def client():
@@ -125,3 +128,64 @@ def test_load_config(client):
     rv = client.get(f'/api/load-config/{game_name}')
     assert rv.status_code == 200
     assert rv.get_json() == test_data
+
+def test_app_creates_without_ocr(monkeypatch):
+    """Test that create_app() succeeds even when OCR initialization would fail."""
+    # Mock OCRDetector to always raise an exception
+    def mock_ocr_init(self, *args, **kwargs):
+        raise OSError("[WinError 127] cudnn_cnn64_9.dll not found")
+    
+    monkeypatch.setattr('src.ai.ocr_detector.OCRDetector.__init__', mock_ocr_init)
+    
+    # Reset singleton state
+    import src.tools.config_assistant.ocr_service as ocr_module
+    ocr_module._ocr_service_instance = None
+    
+    # App should still create successfully
+    app = create_app()
+    app.config['TESTING'] = True
+    
+    with app.test_client() as client:
+        # Basic routes should work
+        rv = client.get('/')
+        assert rv.status_code == 200
+
+
+def test_ocr_detect_returns_503_when_unavailable(monkeypatch):
+    """Test that /api/ocr/detect returns 503 when OCR is unavailable."""
+    # Reset singleton state BEFORE patching
+    import src.tools.config_assistant.ocr_service as ocr_module
+    ocr_module._ocr_service_instance = None
+    
+    # Mock OCRDetector to always raise an exception
+    def mock_ocr_init(self, *args, **kwargs):
+        raise OSError("[WinError 127] cudnn_cnn64_9.dll not found")
+    
+    monkeypatch.setattr('src.ai.ocr_detector.OCRDetector.__init__', mock_ocr_init)
+    
+    app = create_app()
+    app.config['TESTING'] = True
+    
+    # Create a dummy test image
+    import tempfile
+    from PIL import Image
+    
+    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+        img = Image.new('RGB', (100, 100), color='red')
+        img.save(f.name)
+        temp_path = f.name
+    
+    try:
+        with app.test_client() as client:
+            rv = client.post('/api/ocr/detect', json={
+                'image_path': temp_path,
+                'roi': None
+            })
+            assert rv.status_code == 503
+            data = rv.get_json()
+            assert 'error' in data
+            assert data['error'] == 'OCR unavailable'
+    finally:
+        os.unlink(temp_path)
+        # Clean up singleton state for other tests
+        ocr_module._ocr_service_instance = None
