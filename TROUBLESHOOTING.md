@@ -50,7 +50,56 @@
 
 ---
 
-## 4. 获取更多帮助
+## 4. PaddleOCR Initialization Errors (Config Assistant)
+
+### Symptom
+When running `python main.py config-assistant`, you see errors like:
+- `Failed to initialize PaddleOCR`
+- `OSError: [WinError 127] ... cudnn_cnn64_9.dll`
+- Traceback showing `C:\Users\...\Miniconda3\Lib\site-packages\...`
+
+### Cause
+This usually means you're running with the wrong Python interpreter (system/conda Python instead of the project's virtual environment).
+
+### Solution
+
+#### 1. Verify your Python interpreter
+```cmd
+where python
+python -c "import sys; print(sys.executable)"
+```
+
+If the output shows `Miniconda3`, `Anaconda`, or a system path instead of `.venv`, you're using the wrong interpreter.
+
+#### 2. Use the correct interpreter
+Always run with the project's virtual environment:
+```cmd
+.venv\Scripts\python.exe main.py config-assistant --port 8080
+```
+
+#### 3. If OCR still fails: Install .venv_paddle
+
+For Config Assistant's OCR preview feature, you may need a separate PaddleOCR environment:
+
+**For GPU machines (NVIDIA with CUDA):**
+```cmd
+uv venv --python 3.12.11 .venv_paddle
+uv pip install --python .venv_paddle -r requirements-win-paddleocr-gpu-standalone.txt
+```
+
+**For CPU-only machines:**
+```cmd
+uv venv --python 3.12.11 .venv_paddle
+uv pip install --python .venv_paddle paddlepaddle paddleocr numpy opencv-python
+```
+
+#### 4. If you don't need OCR
+Config Assistant will work without OCR - you just won't be able to preview OCR detection. All other features (ROI configuration, color picking, template management) work normally.
+
+---
+
+## 5. 获取更多帮助
+
 
 如果以上方法无法解决问题：
 1. 开启调试模式运行：`--debug`，查看 `temp/` 目录下的中间帧。

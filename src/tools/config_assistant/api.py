@@ -5,7 +5,7 @@ import numpy as np
 from flask import Blueprint, request, jsonify, current_app, send_from_directory
 from PIL import Image
 from src.tools.config_assistant.utils import rgb_to_hsv, calculate_hsv_range, validate_identifier
-from src.tools.config_assistant.ocr_service import ocr_service
+from src.tools.config_assistant.ocr_service import get_ocr_service, OCRUnavailableError
 from src.tools.config_assistant.config_manager import config_manager, PROJECT_ROOT # Imported PROJECT_ROOT
 from src.utils.logger import get_logger
 
@@ -297,9 +297,17 @@ def ocr_detect():
         return jsonify({"error": f"Image file not found: {image_path}"}), 404
     
     try:
+        ocr_service = get_ocr_service()
         results = ocr_service.detect(image_path, roi)
         logger.info(f"OCR API returning {len(results)} results")
         return jsonify({"results": results})
+    except OCRUnavailableError as e:
+        logger.warning(f"OCR unavailable: {e}")
+        return jsonify({
+            "error": "OCR unavailable",
+            "detail": str(e),
+            "help": "Install .venv_paddle environment or set FPSVSNAP_CONFIG_OCR_DEVICE=disabled"
+        }), 503
     except Exception as e:
         logger.error(f"OCR API error: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500

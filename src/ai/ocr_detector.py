@@ -153,32 +153,49 @@ class OCRDetector:
     """
     OCR module for verifying kill text in ROIs using PaddleOCR (preferred) or EasyOCR (fallback).
     """
-    def __init__(self, lang: str = 'ch', use_gpu: bool = True):
+    def __init__(self, lang: str = 'ch', use_gpu: bool = True, force_subprocess: bool = False):
         """
         Initialize OCR Engine.
         
         Args:
             lang: Language code ('ch' for Chinese/English, 'en' for English).
             use_gpu: Whether to use GPU for inference.
+            force_subprocess: Force subprocess mode on Windows (bypasses torch check).
+                             Useful for Config Assistant to avoid DLL conflicts.
         """
         self.lang = lang
         self.use_gpu = use_gpu
+        self.force_subprocess = force_subprocess
         self.ocr_engine = None
         self.engine_type = None
 
         # 已知问题（Windows）：PyTorch(CUDA) 与 PaddlePaddle-GPU 在同一进程内常发生 DLL 冲突。
-        # 若主流程已加载 torch（例如 YOLO/Ultralytics），则用子进程运行 PaddleOCR(GPU)，避免 DLL 冲突。
-        if sys.platform == 'win32' and self.use_gpu and 'torch' in sys.modules:
+        # 若主流程已加载 torch（例如 YOLO/Ultralytics），或强制使用子进程模式，
+        # 则用子进程运行 PaddleOCR(GPU)，避免 DLL 冲突。
+        subprocess_mode = False
+        if sys.platform == 'win32':
+            if force_subprocess:
+                subprocess_mode = True
+            elif self.use_gpu and 'torch' in sys.modules:
+                subprocess_mode = True
+        
+        if subprocess_mode:
             try:
                 self.ocr_engine = _get_or_start_paddle_subprocess_worker()
                 self.engine_type = 'paddle_subprocess'
                 logger.info("Initialized PaddleOCR via subprocess worker (.venv_paddle)")
-            except Exception as e:
+            except FileNotFoundError as e:
                 logger.warning(
-                    "Torch is already loaded; PaddleOCR(GPU) in-process is unsafe on Windows. "
-                    f"Subprocess worker init failed: {e}"
+                    f"Subprocess OCR unavailable: {e}. "
+                    "Install with: uv venv .venv_paddle && "
+                    "uv pip install -r requirements-win-paddleocr-gpu-standalone.txt"
                 )
-        else:
+                subprocess_mode = False
+            except Exception as e:
+                logger.warning(f"Subprocess OCR worker init failed: {e}")
+                subprocess_mode = False
+        
+        if not subprocess_mode:
             if HAS_PADDLEOCR:
                 try:
                     from paddleocr import PaddleOCR
@@ -193,6 +210,16 @@ class OCRDetector:
                     )
                     self.engine_type = 'paddle'
                     logger.info(f"Initialized PaddleOCR (lang={lang}, device={device})")
+                except OSError as e:
+                    # DLL errors are expected when PaddlePaddle conflicts with PyTorch
+                    if "WinError 127" in str(e) or "DLL" in str(e):
+                        logger.warning(
+                            f"PaddleOCR unavailable (DLL conflict): {e}. "
+                            "This is expected when PyTorch is loaded. Consider using force_subprocess=True."
+                        )
+                    else:
+                        logger.exception("Failed to initialize PaddleOCR")
+                    logger.info("Will try EasyOCR as fallback...")
                 except Exception:
                     logger.exception("Failed to initialize PaddleOCR")
                     logger.info("Will try EasyOCR as fallback...")

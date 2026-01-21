@@ -1,0 +1,7 @@
+# CPU-only PaddleOCR environment for Config Assistant
+# Install: uv venv .venv_paddle && uv pip install --python .venv_paddle -r requirements-win-paddleocr-cpu-standalone.txt
+
+paddlepaddle
+paddleocr==3.3.2
+numpy
+opencv-python
