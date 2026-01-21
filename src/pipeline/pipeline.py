@@ -23,8 +23,18 @@ from src.audio.audio_mixer import AudioMixer
 from src.report.report_generator import ReportGenerator
 from src.history.history_manager import HistoryManager
 from src.debug.detection_debugger import DetectionDebugger
+from src.config.fingerprint import (
+    compute_config_fingerprints,
+    compute_path_hash,
+    get_earliest_invalidation_stage,
+    get_stages_to_invalidate,
+    get_unique_output_path,
+)
 
 logger = get_logger(__name__)
+
+# Checkpoint format version for future compatibility
+CHECKPOINT_VERSION = 2
 profiler = get_profiler()
 
 class StageStatus(Enum):
@@ -53,6 +63,11 @@ class Pipeline:
         self.stages: Dict[str, PipelineStage] = {}
         self.results: Dict[str, Any] = {}
         self.checkpoint_file = ""
+        
+        # Incremental rebuild support
+        self._video_path: str = ""
+        self._fingerprints: Dict[str, str] = {}
+        self._loaded_fingerprints: Dict[str, str] = {}
         
         # Initialize stages
         stage_names = [
@@ -86,6 +101,9 @@ class Pipeline:
             return
         
         checkpoint_data = {
+            "checkpoint_version": CHECKPOINT_VERSION,
+            "video_path": self._video_path,
+            "fingerprints": self._fingerprints,
             "stages": {name: {"status": s.status.value, "duration": s.duration} for name, s in self.stages.items()},
             "results": self.results,
             "temp_dir": self.temp_dir,
@@ -97,14 +115,33 @@ class Pipeline:
         except Exception as e:
             logger.error(f"Failed to save checkpoint: {e}")
 
-    def _load_checkpoint(self, checkpoint_path: str):
+    def _load_checkpoint(self, checkpoint_path: str, current_video_path: str) -> bool:
+        """
+        Load checkpoint data and validate against current video path.
+        
+        Returns True if checkpoint was loaded successfully and is valid for resume.
+        Returns False if checkpoint doesn't exist, is invalid, or belongs to different video.
+        """
         if not os.path.exists(checkpoint_path):
             return False
             
         try:
             with open(checkpoint_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+            
+            # Check checkpoint version - old format without version should be treated as fresh run
+            checkpoint_version = data.get("checkpoint_version", 1)
+            if checkpoint_version < CHECKPOINT_VERSION:
+                logger.info(f"Checkpoint version mismatch (v{checkpoint_version} < v{CHECKPOINT_VERSION}), starting fresh run")
+                return False
+            
+            # Validate video_path matches - different video should not resume
+            saved_video_path = data.get("video_path", "")
+            if saved_video_path and saved_video_path != current_video_path:
+                logger.info(f"Checkpoint belongs to different video, starting fresh run")
+                return False
                 
+            # Load stages
             for name, s_data in data.get("stages", {}).items():
                 if name in self.stages:
                     self.stages[name].status = StageStatus(s_data["status"])
@@ -112,11 +149,68 @@ class Pipeline:
             
             self.results = data.get("results", {})
             self.temp_dir = data.get("temp_dir", self.temp_dir)
+            self._loaded_fingerprints = data.get("fingerprints", {})
+            
             logger.info(f"Resumed from checkpoint: {checkpoint_path}")
             return True
         except Exception as e:
             logger.error(f"Failed to load checkpoint: {e}")
             return False
+
+    def _invalidate_from_stage(self, from_stage: str):
+        """
+        Invalidate a stage and all subsequent stages due to config change.
+        
+        This resets the stage status to PENDING, clears associated results,
+        and removes old artifacts from disk so they will be re-generated.
+        """
+        import shutil
+        
+        stages_to_invalidate = get_stages_to_invalidate(from_stage)
+        
+        for stage_name in stages_to_invalidate:
+            if stage_name in self.stages:
+                self.stages[stage_name].status = StageStatus.PENDING
+                self.stages[stage_name].duration = 0
+                self.stages[stage_name].error = None
+                logger.debug(f"Invalidated stage: {stage_name}")
+        
+        # Clear results for invalidated stages
+        result_keys_to_clear = {
+            "frames": ["frames"],
+            "detection": ["events", "detection_json"],
+            "clips": ["clips"],
+            "join": ["joined_video"],
+            "audio": ["final_video"],
+            "report": ["report_path"],
+        }
+        
+        for stage_name in stages_to_invalidate:
+            for key in result_keys_to_clear.get(stage_name, []):
+                if key in self.results:
+                    del self.results[key]
+                    logger.debug(f"Cleared result key: {key}")
+        
+        # Clean up artifact directories/files on disk
+        if self.temp_dir:
+            artifact_paths = {
+                "frames": os.path.join(self.temp_dir, "frames"),
+                "clips": os.path.join(self.temp_dir, "clips"),
+                "join": os.path.join(self.temp_dir, "joined_no_audio.mp4"),
+            }
+            
+            for stage_name in stages_to_invalidate:
+                path = artifact_paths.get(stage_name)
+                if path and os.path.exists(path):
+                    try:
+                        if os.path.isdir(path):
+                            shutil.rmtree(path)
+                            logger.debug(f"Removed artifact directory: {path}")
+                        else:
+                            os.remove(path)
+                            logger.debug(f"Removed artifact file: {path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to remove artifact {path}: {e}")
 
     def run(self, video_path: str, checkpoint_path: str = None) -> bool:
         """
@@ -125,16 +219,36 @@ class Pipeline:
         video_path = os.path.abspath(video_path)
         base_name = os.path.splitext(os.path.basename(video_path))[0]
         
+        # Store video path for checkpoint
+        self._video_path = video_path
+        
+        # Compute current config fingerprints
+        self._fingerprints = compute_config_fingerprints(self.config)
+        
         # Ensure temp directory exists for checkpoints
         checkpoint_dir = self.config.get("global", {}).get("temp_dir", "temp")
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir, exist_ok=True)
-            
-        self.checkpoint_file = checkpoint_path or os.path.join(checkpoint_dir, f"checkpoint_{base_name}.json")
         
-        # Try to resume if it's not a fresh run
+        # Include path hash in checkpoint filename to avoid conflicts with same-named videos
+        path_hash = compute_path_hash(video_path)
+        self.checkpoint_file = checkpoint_path or os.path.join(
+            checkpoint_dir, f"checkpoint_{base_name}_{path_hash}.json"
+        )
+        
+        # Try to resume if checkpoint exists
+        checkpoint_loaded = False
         if os.path.exists(self.checkpoint_file):
-            self._load_checkpoint(self.checkpoint_file)
+            checkpoint_loaded = self._load_checkpoint(self.checkpoint_file, video_path)
+            
+            # If checkpoint loaded, check for config changes and invalidate if needed
+            if checkpoint_loaded and self._loaded_fingerprints:
+                invalidate_from = get_earliest_invalidation_stage(
+                    self._loaded_fingerprints, self._fingerprints
+                )
+                if invalidate_from:
+                    logger.info(f"Config changed, invalidating from stage: {invalidate_from}")
+                    self._invalidate_from_stage(invalidate_from)
 
         try:
             # 1. Metadata
@@ -395,16 +509,49 @@ class Pipeline:
             output_dir = self.config.get("global", {}).get("output_dir", "output")
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir, exist_ok=True)
-            final_video_path = os.path.join(output_dir, final_video_name)
+            base_final_path = os.path.join(output_dir, final_video_name)
             
-            # 检查final_video是否已存在，如果不存在则重新执行audio阶段
-            final_video_exists = os.path.exists(final_video_path)
+            # Check if final_video exists - if not, we need to rebuild
+            final_video_exists = os.path.exists(base_final_path)
             need_audio_mixing = (self.stages["audio"].status != StageStatus.SUCCESS) or not final_video_exists
             
+            # Determine final output path: use unique path only when actually re-running audio
+            if need_audio_mixing and final_video_exists:
+                # Config changed or rebuild needed, but file exists -> use suffix _1, _2, etc.
+                final_video_path = get_unique_output_path(base_final_path)
+                logger.info(f"Output file exists, using unique path: {final_video_path}")
+            else:
+                final_video_path = base_final_path
+            
             if need_audio_mixing:
+                # Chain fallback: if joined_video is missing, try to rebuild from earlier stages
                 if not joined_video or not os.path.exists(joined_video):
-                    self._update_stage("audio", StageStatus.SKIPPED)
-                else:
+                    # Check if we can rebuild join stage
+                    if extracted_clips:
+                        logger.info("Joined video missing, re-running join stage for chain fallback")
+                        self.stages["join"].status = StageStatus.PENDING
+                        # Re-run join
+                        self._update_stage("join", StageStatus.RUNNING)
+                        joined_video = os.path.join(self.temp_dir, "joined_no_audio.mp4")
+                        joiner = VideoJoiner(self.config)
+                        clip_paths = []
+                        for clip in extracted_clips:
+                            clip_path = clip.get("path") or clip.get("output_path")
+                            if clip_path and os.path.exists(clip_path):
+                                clip_paths.append(clip_path)
+                        
+                        if clip_paths and joiner.join_clips(clip_paths, joined_video):
+                            self.results["joined_video"] = joined_video
+                            self._update_stage("join", StageStatus.SUCCESS)
+                        else:
+                            logger.warning("Chain fallback failed: could not join clips")
+                            self._update_stage("audio", StageStatus.SKIPPED)
+                            joined_video = None
+                    else:
+                        logger.warning("Cannot rebuild: no clips available for chain fallback")
+                        self._update_stage("audio", StageStatus.SKIPPED)
+                        
+                if joined_video and os.path.exists(joined_video):
                     self._update_stage("audio", StageStatus.RUNNING)
                     mixer = AudioMixer(self.config)
                     result_path = mixer.mix_audio(joined_video, final_video_path)
@@ -416,7 +563,7 @@ class Pipeline:
                     self.results["final_video"] = final_video_path
                     self._update_stage("audio", StageStatus.SUCCESS)
             else:
-                # 从checkpoint恢复，final_video已存在
+                # Resume from checkpoint, final_video already exists
                 self.results["final_video"] = final_video_path
 
             # 7. Report Generation
