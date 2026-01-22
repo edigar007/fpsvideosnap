@@ -111,6 +111,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.colorTab && config.detection && config.detection.colors) {
                 window.colorTab.setColors(config.detection.colors);
             }
+
+            if (window.rulesTab && config.detection && config.detection.rules) {
+                window.rulesTab.setRules(config.detection.rules);
+            }
             
             showStatus(`${gameId} 配置已加载`, 'success');
         } catch (err) {
@@ -224,9 +228,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const key = e.key.toLowerCase();
             
-            // Tab switching: 1-4
-            if (['1', '2', '3', '4'].includes(key)) {
-                const tabs = ['roi', 'ocr', 'templates', 'colors'];
+            // Tab switching: 1-5
+            if (['1', '2', '3', '4', '5'].includes(key)) {
+                const tabs = ['roi', 'ocr', 'templates', 'colors', 'rules'];
                 if (window.tabManager) {
                     window.tabManager.switchTab(tabs[parseInt(key) - 1]);
                 }

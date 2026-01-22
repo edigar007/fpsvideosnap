@@ -189,3 +189,156 @@ def test_ocr_detect_returns_503_when_unavailable(monkeypatch):
         os.unlink(temp_path)
         # Clean up singleton state for other tests
         ocr_module._ocr_service_instance = None
+
+
+# =============================================================================
+# Rules API Tests (Task 5: OR-of-AND detection rules)
+# =============================================================================
+
+class TestRulesAPI:
+    """Tests for /api/config/<game>/rules endpoints."""
+    
+    @pytest.fixture
+    def game_with_config(self, client):
+        """Create a test game with config for rules testing."""
+        game_name = "test_rules_game"
+        # Create the game
+        rv = client.post('/api/game/create', json={"game_name": game_name})
+        # Ignore if already exists
+        yield game_name
+        # Cleanup
+        config_path = os.path.join(CONFIG_GAMES_DIR, f"{game_name}.yaml")
+        if os.path.exists(config_path):
+            os.remove(config_path)
+    
+    def test_get_rules_empty(self, client, game_with_config):
+        """GET /api/config/<game>/rules returns empty list when no rules configured."""
+        rv = client.get(f'/api/config/{game_with_config}/rules')
+        assert rv.status_code == 200
+        data = rv.get_json()
+        assert "rules" in data
+        assert data["rules"] == []
+    
+    def test_get_rules_not_found(self, client):
+        """GET /api/config/<game>/rules returns 404 for non-existent game."""
+        rv = client.get('/api/config/nonexistent_game_xyz/rules')
+        assert rv.status_code == 404
+    
+    def test_put_rules_success(self, client, game_with_config):
+        """PUT /api/config/<game>/rules updates rules successfully."""
+        rules = [
+            {"name": "yolo_and_color", "enabled": True, "require": ["yolo", "color"]},
+            {"name": "ocr_only", "enabled": False, "require": ["ocr"]}
+        ]
+        rv = client.put(f'/api/config/{game_with_config}/rules', json={"rules": rules})
+        assert rv.status_code == 200
+        data = rv.get_json()
+        assert data["message"] == "Rules updated"
+        assert "config" in data
+        assert data["config"]["detection"]["rules"] == rules
+    
+    def test_put_rules_returns_full_config(self, client, game_with_config):
+        """PUT /api/config/<game>/rules returns full config in response."""
+        rules = [{"name": "test_rule", "enabled": True, "require": ["template"]}]
+        rv = client.put(f'/api/config/{game_with_config}/rules', json={"rules": rules})
+        assert rv.status_code == 200
+        data = rv.get_json()
+        # Should have full config structure
+        assert "config" in data
+        config = data["config"]
+        assert "detection" in config
+        assert "rules" in config["detection"]
+    
+    def test_put_rules_not_found(self, client):
+        """PUT /api/config/<game>/rules returns 404 for non-existent game."""
+        rules = [{"name": "test", "enabled": True, "require": ["yolo"]}]
+        rv = client.put('/api/config/nonexistent_game_xyz/rules', json={"rules": rules})
+        assert rv.status_code == 404
+    
+    def test_put_rules_missing_rules_field(self, client, game_with_config):
+        """PUT /api/config/<game>/rules returns 400 when 'rules' field missing."""
+        rv = client.put(f'/api/config/{game_with_config}/rules', json={"other": "data"})
+        assert rv.status_code == 400
+        data = rv.get_json()
+        assert "error" in data
+    
+    def test_put_rules_validation_not_list(self, client, game_with_config):
+        """PUT /api/config/<game>/rules rejects non-list rules."""
+        rv = client.put(f'/api/config/{game_with_config}/rules', json={"rules": "not a list"})
+        assert rv.status_code == 400
+        data = rv.get_json()
+        assert "detection.rules must be a list" in data["error"]
+    
+    def test_put_rules_validation_empty_require(self, client, game_with_config):
+        """PUT /api/config/<game>/rules rejects rule with empty require array."""
+        rules = [{"name": "empty_rule", "enabled": True, "require": []}]
+        rv = client.put(f'/api/config/{game_with_config}/rules', json={"rules": rules})
+        assert rv.status_code == 400
+        data = rv.get_json()
+        assert "require cannot be empty" in data["error"]
+    
+    def test_put_rules_validation_invalid_signal(self, client, game_with_config):
+        """PUT /api/config/<game>/rules rejects rule with invalid signal name."""
+        rules = [{"name": "bad_signal", "enabled": True, "require": ["yolo", "invalid_signal"]}]
+        rv = client.put(f'/api/config/{game_with_config}/rules', json={"rules": rules})
+        assert rv.status_code == 400
+        data = rv.get_json()
+        assert "unknown signal 'invalid_signal'" in data["error"]
+    
+    def test_put_rules_validation_duplicate_name(self, client, game_with_config):
+        """PUT /api/config/<game>/rules rejects rules with duplicate names."""
+        rules = [
+            {"name": "same_name", "enabled": True, "require": ["yolo"]},
+            {"name": "same_name", "enabled": False, "require": ["ocr"]}
+        ]
+        rv = client.put(f'/api/config/{game_with_config}/rules', json={"rules": rules})
+        assert rv.status_code == 400
+        data = rv.get_json()
+        assert "duplicate name 'same_name'" in data["error"]
+    
+    def test_put_rules_validation_missing_name(self, client, game_with_config):
+        """PUT /api/config/<game>/rules rejects rule without name field."""
+        rules = [{"enabled": True, "require": ["yolo"]}]
+        rv = client.put(f'/api/config/{game_with_config}/rules', json={"rules": rules})
+        assert rv.status_code == 400
+        data = rv.get_json()
+        assert "name is required" in data["error"]
+    
+    def test_put_rules_validation_missing_enabled(self, client, game_with_config):
+        """PUT /api/config/<game>/rules rejects rule without enabled field."""
+        rules = [{"name": "test", "require": ["yolo"]}]
+        rv = client.put(f'/api/config/{game_with_config}/rules', json={"rules": rules})
+        assert rv.status_code == 400
+        data = rv.get_json()
+        assert "enabled is required" in data["error"]
+    
+    def test_put_rules_validation_missing_require(self, client, game_with_config):
+        """PUT /api/config/<game>/rules rejects rule without require field."""
+        rules = [{"name": "test", "enabled": True}]
+        rv = client.put(f'/api/config/{game_with_config}/rules', json={"rules": rules})
+        assert rv.status_code == 400
+        data = rv.get_json()
+        assert "require is required" in data["error"]
+    
+    def test_put_rules_all_valid_signals(self, client, game_with_config):
+        """PUT /api/config/<game>/rules accepts all valid signal types."""
+        rules = [
+            {"name": "all_signals", "enabled": True, "require": ["ocr", "template", "color", "yolo"]}
+        ]
+        rv = client.put(f'/api/config/{game_with_config}/rules', json={"rules": rules})
+        assert rv.status_code == 200
+        data = rv.get_json()
+        assert data["config"]["detection"]["rules"][0]["require"] == ["ocr", "template", "color", "yolo"]
+    
+    def test_get_rules_after_put(self, client, game_with_config):
+        """GET /api/config/<game>/rules returns rules after PUT."""
+        rules = [{"name": "persisted_rule", "enabled": True, "require": ["color"]}]
+        # First PUT
+        rv = client.put(f'/api/config/{game_with_config}/rules', json={"rules": rules})
+        assert rv.status_code == 200
+        
+        # Then GET
+        rv = client.get(f'/api/config/{game_with_config}/rules')
+        assert rv.status_code == 200
+        data = rv.get_json()
+        assert data["rules"] == rules

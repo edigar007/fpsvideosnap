@@ -63,6 +63,57 @@ class ConfigLoader:
             if 'color_threshold' in pre and not (0 <= pre['color_threshold'] <= 1):
                 raise ValueError("detection.prefilter.color_threshold must be between 0 and 1")
 
+        # Validate Rules (OR-of-AND kill detection rules)
+        if 'rules' in det:
+            rules = det['rules']
+            
+            # Rules must be a list
+            if not isinstance(rules, list):
+                raise ValueError("detection.rules must be a list")
+            
+            # Allowed signal names
+            allowed_signals = {'ocr', 'template', 'color', 'yolo'}
+            
+            # Track names for uniqueness check
+            seen_names = set()
+            
+            for i, rule in enumerate(rules):
+                prefix = f"detection.rules[{i}]"
+                
+                # Each rule must be a dict
+                if not isinstance(rule, dict):
+                    raise ValueError(f"{prefix} must be a dict")
+                
+                # Validate name (required, non-empty string)
+                name = rule.get('name')
+                if not isinstance(name, str) or not name.strip():
+                    raise ValueError(f"{prefix}.name must be a non-empty string")
+                
+                # Check name uniqueness
+                if name in seen_names:
+                    raise ValueError(f"detection.rules: duplicate name '{name}'")
+                seen_names.add(name)
+                
+                # Validate enabled (must be bool)
+                enabled = rule.get('enabled')
+                if not isinstance(enabled, bool):
+                    raise ValueError(f"{prefix}.enabled must be a boolean")
+                
+                # Validate require (must be non-empty list of valid signals)
+                require = rule.get('require')
+                if not isinstance(require, list):
+                    raise ValueError(f"{prefix}.require must be a list")
+                
+                if len(require) == 0:
+                    raise ValueError(f"{prefix}.require must not be empty")
+                
+                for j, signal in enumerate(require):
+                    if not isinstance(signal, str) or signal not in allowed_signals:
+                        raise ValueError(
+                            f"{prefix}.require[{j}] '{signal}' is not a valid signal. "
+                            f"Allowed: {', '.join(sorted(allowed_signals))}"
+                        )
+
     def _load_yaml(self, path: str) -> Dict[str, Any]:
         with open(path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f) or {}
