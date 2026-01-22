@@ -49,6 +49,17 @@ class RulesTab {
     setRules(rules) {
         this.rules = Array.isArray(rules) ? [...rules] : [];
         this.render();
+        
+        // Auto-select first rule if available
+        if (this.rules.length > 0) {
+            this.selectRule(this.rules[0].name);
+        } else {
+            // No rules, ensure we're on global
+            this.selectedRuleName = null;
+            if (window.app && window.app.setCurrentRule) {
+                window.app.setCurrentRule(null);
+            }
+        }
     }
 
     /**
@@ -62,7 +73,7 @@ class RulesTab {
             require: ['color']  // Default to color as it's the most common
         };
         this.rules.push(newRule);
-        this.render();
+        this.selectRule(newRule.name);  // Auto-select the new rule
         
         // Scroll to the new rule
         setTimeout(() => {
@@ -77,13 +88,31 @@ class RulesTab {
      * Remove a rule by index
      */
     removeRule(index) {
-        if (confirm(`确定删除规则 "${this.rules[index].name}"？`)) {
+        const deletedRuleName = this.rules[index].name;
+        if (confirm(`确定删除规则 "${deletedRuleName}"？`)) {
             this.rules.splice(index, 1);
+            
+            // If deleted rule was selected, update selection
+            if (this.selectedRuleName === deletedRuleName) {
+                if (this.rules.length > 0) {
+                    this.selectedRuleName = this.rules[0].name;
+                    if (window.app && window.app.setCurrentRule) {
+                        window.app.setCurrentRule(this.rules[0].name);
+                    }
+                } else {
+                    this.deselectRule();
+                    return; // deselectRule already renders
+                }
+            }
+            
             this.render();
         }
     }
 
     selectRule(ruleName) {
+        // Guard: if already selected, skip re-render to prevent focus loss
+        if (this.selectedRuleName === ruleName) return;
+        
         this.selectedRuleName = ruleName;
         if (window.app && window.app.setCurrentRule) {
             window.app.setCurrentRule(ruleName);
@@ -139,7 +168,7 @@ class RulesTab {
                     <div class="rule-name-row">
                         <div class="rule-select-area" style="flex: 1; display: flex; align-items: center; cursor: pointer;">
                             <input type="text" class="rule-name-input" value="${this.escapeHtml(rule.name)}" 
-                                   placeholder="规则名称" title="规则名称" onclick="event.stopPropagation()">
+                                   placeholder="规则名称" title="规则名称">
                             ${this.selectedRuleName === rule.name ? '<span class="status-badge" style="margin-left: 10px;">当前编辑</span>' : ''}
                         </div>
                         <label class="toggle small">
