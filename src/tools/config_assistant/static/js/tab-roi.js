@@ -29,6 +29,10 @@ class ROITab {
             this.updatePreview(e.detail.roi);
         });
 
+        document.addEventListener('ruleChanged', (e) => {
+            this.loadRuleROI(e.detail.ruleName);
+        });
+
         if (this.saveBtn) {
             this.saveBtn.addEventListener('click', () => this.saveROI());
         }
@@ -76,11 +80,17 @@ class ROITab {
         const game = document.getElementById('game-selector').value;
         if (!game) return alert('请选择游戏');
 
+        const payload = { roi: this.roi || roi };
+        const currentRule = window.app?.currentRuleName;
+        if (currentRule) {
+            payload.rule_name = currentRule;
+        }
+
         try {
             const response = await fetch(`/api/config/${game}/roi`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ roi })
+                body: JSON.stringify(payload)
             });
 
             if (response.ok) {
@@ -120,6 +130,35 @@ class ROITab {
         if (!roi) return;
         this.updateFields(roi);
         this.updatePreview(roi);
+        if (window.canvasState) {
+            window.canvasState.roi = roi;
+            window.canvasState.render();
+        }
+    }
+
+    loadRuleROI(ruleName) {
+        const config = window.app?.config;
+        if (!config?.detection) return;
+        
+        let roi = config.detection.killfeed_roi; // default global
+        
+        if (ruleName) {
+            const rules = config.detection.rules || [];
+            const rule = rules.find(r => r.name === ruleName);
+            if (rule?.detection_overrides?.killfeed_roi) {
+                roi = rule.detection_overrides.killfeed_roi;
+            }
+        }
+        
+        // If we found an ROI (global or override), update. 
+        // If override doesn't exist, we fallback to global (default behavior logic)
+        // OR should we show empty if not overridden? 
+        // Requirement says "fallback to global if none"
+        
+        this.setROI(roi);
+        if (window.app?.showStatus) {
+            window.app.showStatus(ruleName ? `已加载规则 ${ruleName} 的 ROI` : '已加载全局 ROI');
+        }
     }
 }
 

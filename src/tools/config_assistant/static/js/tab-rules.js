@@ -12,6 +12,7 @@ class RulesTab {
         
         // Internal state: array of rule objects
         this.rules = [];
+        this.selectedRuleName = null;
         
         // Valid signal types
         this.validSignals = ['ocr', 'template', 'color', 'yolo'];
@@ -82,29 +83,65 @@ class RulesTab {
         }
     }
 
+    selectRule(ruleName) {
+        this.selectedRuleName = ruleName;
+        if (window.app && window.app.setCurrentRule) {
+            window.app.setCurrentRule(ruleName);
+        }
+        this.render(); // Re-render to show selection
+    }
+
+    deselectRule() {
+        this.selectedRuleName = null;
+        if (window.app && window.app.setCurrentRule) {
+            window.app.setCurrentRule(null);
+        }
+        this.render();
+    }
+
     /**
      * Render the rules list
      */
     render() {
         if (!this.rulesList) return;
         
+        this.rulesList.innerHTML = '';
+
+        // Add "Edit Global" button at top if there are rules
+        if (this.rules.length > 0) {
+            const globalBtn = document.createElement('div');
+            globalBtn.className = `rule-item global-config-item ${!this.selectedRuleName ? 'selected' : ''}`;
+            globalBtn.innerHTML = `
+                <div class="rule-header" style="cursor: pointer;">
+                    <div class="rule-name-row">
+                        <i class="fas fa-globe"></i> 
+                        <span style="font-weight: bold; margin-left: 8px;">全局默认配置</span>
+                        ${!this.selectedRuleName ? '<span class="status-badge" style="margin-left: auto;">当前编辑</span>' : ''}
+                    </div>
+                </div>
+            `;
+            globalBtn.onclick = () => this.deselectRule();
+            this.rulesList.appendChild(globalBtn);
+        }
+        
         if (this.rules.length === 0) {
             this.rulesList.innerHTML = '<div class="empty-state">尚未配置规则，将使用默认加权计算</div>';
             return;
         }
         
-        this.rulesList.innerHTML = '';
-        
         this.rules.forEach((rule, index) => {
             const item = document.createElement('div');
-            item.className = 'rule-item';
+            item.className = `rule-item ${this.selectedRuleName === rule.name ? 'selected' : ''}`;
             item.dataset.index = index;
             
             item.innerHTML = `
                 <div class="rule-header">
                     <div class="rule-name-row">
-                        <input type="text" class="rule-name-input" value="${this.escapeHtml(rule.name)}" 
-                               placeholder="规则名称" title="规则名称">
+                        <div class="rule-select-area" style="flex: 1; display: flex; align-items: center; cursor: pointer;">
+                            <input type="text" class="rule-name-input" value="${this.escapeHtml(rule.name)}" 
+                                   placeholder="规则名称" title="规则名称" onclick="event.stopPropagation()">
+                            ${this.selectedRuleName === rule.name ? '<span class="status-badge" style="margin-left: 10px;">当前编辑</span>' : ''}
+                        </div>
                         <label class="toggle small">
                             <input type="checkbox" class="rule-enabled" ${rule.enabled ? 'checked' : ''}>
                             <span class="slider"></span>
@@ -129,9 +166,17 @@ class RulesTab {
             `;
             
             // Event listeners
+            const selectArea = item.querySelector('.rule-select-area');
+            selectArea.addEventListener('click', () => this.selectRule(rule.name));
+
             const nameInput = item.querySelector('.rule-name-input');
             nameInput.addEventListener('change', (e) => {
-                this.rules[index].name = e.target.value.trim() || `rule_${index + 1}`;
+                const oldName = this.rules[index].name;
+                const newName = e.target.value.trim() || `rule_${index + 1}`;
+                this.rules[index].name = newName;
+                if (this.selectedRuleName === oldName) {
+                    this.selectRule(newName); // Update selection if renamed
+                }
             });
             
             const enabledCheck = item.querySelector('.rule-enabled');

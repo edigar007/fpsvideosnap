@@ -126,6 +126,47 @@ detection:
       require: ["template", "color"]
 ```
 
+#### Per-Rule Detection Overrides (`detection_overrides`)
+
+每条规则可以通过 `detection_overrides` 字段覆盖全局检测参数，实现不同规则使用不同的检测区域或关键词。
+
+**可覆盖的字段：**
+- `killfeed_roi`: `[x, y, w, h]` - 覆盖检测区域
+- `ocr`: OCR 设置
+  - `enabled`: boolean
+  - `keywords`: 关键词列表
+  - `similarity_threshold`: 0.0-1.0
+- `templates`: 模板配置
+- `colors`: 颜色配置
+- `prefilter`: 预过滤设置
+
+**合并行为：** 规则覆盖与全局 `detection.*` 深度合并，未指定的字段自动回退到全局默认值。
+
+**示例：**
+```yaml
+detection:
+  killfeed_roi: [0.27, 0.54, 0.20, 0.22]  # 全局默认
+  ocr:
+    enabled: true
+    keywords: ["击杀", "爆头"]
+    similarity_threshold: 0.9
+  
+  rules:
+    - name: "english_ui"
+      enabled: true
+      require: ["ocr"]
+      detection_overrides:
+        killfeed_roi: [0.10, 0.10, 0.30, 0.30]  # 不同区域
+        ocr:
+          keywords: ["KILL", "HEADSHOT"]  # 英文关键词
+          similarity_threshold: 0.8
+    
+    - name: "color_only"
+      enabled: true
+      require: ["color"]
+      # 无覆盖 - 使用全局检测设置
+```
+
 #### 注意事项
 
 1. **兼容性**: 如果 `rules` 为空或未配置，自动回退到传统加权模式。
@@ -133,6 +174,7 @@ detection:
 3. **名称唯一**: 同一配置文件中，规则名称不能重复。
 4. **OCR 硬门槛**: 如果 `ocr.required=true`，即使规则不包含 `ocr`，OCR 未识别时也会阻止击杀判定。
 5. **规则顺序**: 按配置顺序检查，第一个匹配的规则即生效。
+6. **Per-rule overrides**: 规则可以通过 `detection_overrides` 指定独立的 ROI、OCR 关键词等，与全局设置进行深度合并。
 
 ---
 

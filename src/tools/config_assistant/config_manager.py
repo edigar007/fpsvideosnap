@@ -116,7 +116,56 @@ class ConfigManager:
             logger.error(f"Error updating config section: {e}")
             return False
 
+    def update_rule_override(self, game_name: str, rule_name: str, override_path: str, value: Any) -> bool:
+        """
+        Updates a specific override for a detection rule.
+        override_path: e.g., "killfeed_roi", "ocr.keywords"
+        """
+        config = self.get_config(game_name)
+        if config is None:
+            return False
+
+        try:
+            rules = config.get("detection", {}).get("rules", [])
+            target_rule = None
+            for rule in rules:
+                if rule.get("name") == rule_name:
+                    target_rule = rule
+                    break
+            
+            if target_rule is None:
+                logger.error(f"Rule '{rule_name}' not found for game: {game_name}")
+                return False
+
+            if "detection_overrides" not in target_rule:
+                target_rule["detection_overrides"] = {}
+            
+            overrides = target_rule["detection_overrides"]
+            
+            # Navigate to the section to update within detection_overrides
+            parts = override_path.split('.')
+            current = overrides
+            for part in parts[:-1]:
+                if part not in current or not isinstance(current[part], dict):
+                    current[part] = {}
+                current = current[part]
+            
+            # Update the value
+            current[parts[-1]] = value
+
+            # Save the updated config
+            game_config_path = os.path.join(self.games_dir, f"{game_name}.yaml")
+            with open(game_config_path, 'w', encoding='utf-8') as f:
+                yaml.dump(config, f, allow_unicode=True, sort_keys=False)
+
+            logger.info(f"Updated rule override {override_path} for rule '{rule_name}' in game: {game_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating rule override: {e}")
+            return False
+
     def export_config_yaml(self, game_name: str) -> Optional[str]:
+
         """Returns the full configuration as a YAML string."""
         config = self.get_config(game_name)
         if config is None:

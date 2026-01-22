@@ -132,9 +132,12 @@ class OCRService:
                 self._cache[cache_key] = results
                 
             return results
+        except OCRUnavailableError:
+            raise
         except Exception as e:
             logger.error(f"Error during OCR detection: {e}")
             return []
+
 
 # Singleton accessor with lazy instantiation
 _ocr_service_instance: Optional[OCRService] = None

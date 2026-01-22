@@ -25,6 +25,10 @@ class TemplateTab {
                 this.refreshList();
             }
         });
+
+        document.addEventListener('ruleChanged', (e) => {
+            this.loadRuleTemplates(e.detail.ruleName);
+        });
     }
 
     setTemplates(templates) {
@@ -88,20 +92,34 @@ class TemplateTab {
             const templatePath = cropData.path;
             
             // Then, add to config
+            const payload = {
+                name: name,
+                roi: subRoi,
+                path: templatePath,
+                threshold: 0.8
+            };
+
+            const currentRule = window.app?.currentRuleName;
+            if (currentRule) {
+                payload.rule_name = currentRule;
+            }
+
             const response = await fetch(`/api/config/${game}/templates`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: name,
-                    roi: subRoi,
-                    path: templatePath,
-                    threshold: 0.8
-                })
+                body: JSON.stringify(payload)
             });
 
             if (response.ok) {
                 const data = await response.json();
-                this.templates = data.config.detection.templates;
+                // Update local templates from response
+                if (currentRule) {
+                     const rule = data.config.detection.rules.find(r => r.name === currentRule);
+                     this.templates = rule.detection_overrides?.templates || {};
+                } else {
+                     this.templates = data.config.detection.templates;
+                }
+                
                 this.refreshList();
                 if (window.configPreview) window.configPreview.update(data.config);
                 window.canvasState.subRoi = null;
@@ -183,15 +201,26 @@ class TemplateTab {
 
     async updateThreshold(name, threshold) {
         const game = document.getElementById('game-selector').value;
+        
+        const payload = { threshold };
+        const currentRule = window.app?.currentRuleName;
+        if (currentRule) {
+            payload.rule_name = currentRule;
+        }
+
         try {
             const response = await fetch(`/api/config/${game}/templates/${name}/threshold`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ threshold })
+                body: JSON.stringify(payload)
             });
             if (response.ok) {
                 const data = await response.json();
                 if (window.configPreview) window.configPreview.update(data.config);
+                // Also update local state
+                if (this.templates[name]) {
+                    this.templates[name].threshold = threshold;
+                }
             }
         } catch (err) {
             console.error('Update threshold error:', err);
@@ -202,19 +231,60 @@ class TemplateTab {
         if (!confirm(`确定要删除模板 "${name}" 吗？`)) return;
 
         const game = document.getElementById('game-selector').value;
+        
+        // For DELETE, usually params are in URL, but we need rule_name.
+        // If API supports query param? Or body?
+        // Standard REST DELETE usually doesn't have body, but many servers allow it.
+        // Alternatively, use query param. Let's assume query param or body.
+        // Task 4 didn't specify DELETE changes, but backend likely supports it if using same mixin.
+        // Let's try query param first as it's safer for DELETE.
+        
+        const currentRule = window.app?.currentRuleName;
+        let url = `/api/config/${game}/templates/${name}`;
+        if (currentRule) {
+            url += `?rule_name=${encodeURIComponent(currentRule)}`;
+        }
+
         try {
-            const response = await fetch(`/api/config/${game}/templates/${name}`, {
+            const response = await fetch(url, {
                 method: 'DELETE'
             });
 
             if (response.ok) {
                 const data = await response.json();
-                this.templates = data.config.detection.templates;
+                
+                if (currentRule) {
+                    const rule = data.config.detection.rules.find(r => r.name === currentRule);
+                    this.templates = rule.detection_overrides?.templates || {};
+                } else {
+                    this.templates = data.config.detection.templates;
+                }
+                
                 this.refreshList();
                 if (window.configPreview) window.configPreview.update(data.config);
             }
         } catch (err) {
             console.error('Delete template error:', err);
+        }
+    }
+
+    loadRuleTemplates(ruleName) {
+        const config = window.app?.config;
+        if (!config?.detection) return;
+        
+        let templates = config.detection.templates || {}; // default global
+        
+        if (ruleName) {
+            const rules = config.detection.rules || [];
+            const rule = rules.find(r => r.name === ruleName);
+            if (rule?.detection_overrides?.templates) {
+                templates = rule.detection_overrides.templates;
+            }
+        }
+        
+        this.setTemplates(templates);
+        if (window.app?.showStatus) {
+            window.app.showStatus(ruleName ? `已加载规则 ${ruleName} 的模板` : '已加载全局模板');
         }
     }
 }

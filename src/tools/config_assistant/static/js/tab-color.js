@@ -35,6 +35,10 @@ class ColorTab {
                 }
             }
         });
+
+        document.addEventListener('ruleChanged', (e) => {
+            this.loadRuleColors(e.detail.ruleName);
+        });
     }
 
     setColors(colors) {
@@ -80,21 +84,35 @@ class ColorTab {
         const lower = [Math.max(0, hsv[0]-tolerance), Math.max(0, hsv[1]-tolerance*2), Math.max(0, hsv[2]-tolerance*2)];
         const upper = [Math.min(180, hsv[0]+tolerance), Math.min(255, hsv[1]+tolerance*2), Math.min(255, hsv[2]+tolerance*2)];
 
+        const payload = {
+            name: name,
+            hsv_lower: lower,
+            hsv_upper: upper,
+            tolerance: tolerance
+        };
+
+        const currentRule = window.app?.currentRuleName;
+        if (currentRule) {
+            payload.rule_name = currentRule;
+        }
+
         try {
             const response = await fetch(`/api/config/${game}/colors`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: name,
-                    hsv_lower: lower,
-                    hsv_upper: upper,
-                    tolerance: tolerance
-                })
+                body: JSON.stringify(payload)
             });
 
             if (response.ok) {
                 const data = await response.json();
-                this.colors = data.config.detection.colors;
+                
+                if (currentRule) {
+                    const rule = data.config.detection.rules.find(r => r.name === currentRule);
+                    this.colors = rule.detection_overrides?.colors || {};
+                } else {
+                    this.colors = data.config.detection.colors;
+                }
+                
                 this.refreshList();
                 if (window.configPreview) window.configPreview.update(data.config);
             }
@@ -161,19 +179,94 @@ class ColorTab {
 
     async updateColorTolerance(name, tolerance) {
         const game = document.getElementById('game-selector').value;
+        
+        const payload = { tolerance };
+        const currentRule = window.app?.currentRuleName;
+        if (currentRule) {
+            payload.rule_name = currentRule;
+        }
+
         try {
             const response = await fetch(`/api/config/${game}/colors/${name}/tolerance`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tolerance })
+                body: JSON.stringify(payload)
             });
             if (response.ok) {
                 const data = await response.json();
-                this.colors = data.config.detection.colors;
+                
+                // Update logic handled by refresh usually, but here we can optimize
+                if (currentRule) {
+                    const rule = data.config.detection.rules.find(r => r.name === currentRule);
+                    this.colors = rule.detection_overrides?.colors || {};
+                } else {
+                    this.colors = data.config.detection.colors;
+                }
+                
                 if (window.configPreview) window.configPreview.update(data.config);
                 // Auto refresh preview if it was active
                 this.previewColor(name);
             }
+        } catch (err) {
+            console.error('Update color tolerance error:', err);
+        }
+    }
+
+    async deleteColor(name) {
+        if (!confirm(`确定要删除颜色 "${name}" 吗？`)) return;
+        const game = document.getElementById('game-selector').value;
+        
+        const currentRule = window.app?.currentRuleName;
+        let url = `/api/config/${game}/colors/${name}`;
+        if (currentRule) {
+            url += `?rule_name=${encodeURIComponent(currentRule)}`;
+        }
+
+        try {
+            const response = await fetch(url, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                
+                if (currentRule) {
+                    const rule = data.config.detection.rules.find(r => r.name === currentRule);
+                    this.colors = rule.detection_overrides?.colors || {};
+                } else {
+                    this.colors = data.config.detection.colors;
+                }
+                
+                this.refreshList();
+                if (window.configPreview) window.configPreview.update(data.config);
+                window.canvasState.colorMask = null;
+                window.canvasState.render();
+            }
+        } catch (err) {
+            console.error('Delete color error:', err);
+        }
+    }
+
+    loadRuleColors(ruleName) {
+        const config = window.app?.config;
+        if (!config?.detection) return;
+        
+        let colors = config.detection.colors || {}; // default global
+        
+        if (ruleName) {
+            const rules = config.detection.rules || [];
+            const rule = rules.find(r => r.name === ruleName);
+            if (rule?.detection_overrides?.colors) {
+                colors = rule.detection_overrides.colors;
+            }
+        }
+        
+        this.setColors(colors);
+        if (window.app?.showStatus) {
+            window.app.showStatus(ruleName ? `已加载规则 ${ruleName} 的颜色` : '已加载全局颜色');
+        }
+    }
+}
         } catch (err) {
             console.error('Update color tolerance error:', err);
         }

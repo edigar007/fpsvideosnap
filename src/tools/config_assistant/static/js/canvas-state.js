@@ -343,6 +343,11 @@ setImage(img) {
             this.ctx.lineWidth = 1 / this.scale;
             
             this.tempHighlights.forEach(box => {
+                // Guard: skip invalid boxes
+                if (!Array.isArray(box) || box.length !== 4) {
+                    console.warn('[CanvasState] Invalid box in tempHighlights:', box);
+                    return;
+                }
                 // box is [x, y, w, h] relative to ROI (0-1)
                 const bx = rpx + box[0] * rpw;
                 const by = rpy + box[1] * rph;
