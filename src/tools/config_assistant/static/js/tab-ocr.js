@@ -36,6 +36,10 @@ class OCRTab {
             }
         });
 
+        document.addEventListener('ruleChanged', (e) => {
+            this.loadRuleOCR(e.detail.ruleName);
+        });
+
         this.setupUI();
     }
 
@@ -165,7 +169,9 @@ class OCRTab {
         });
 
         if (window.canvasState) {
-            window.canvasState.tempHighlights = matches.map(m => m.box);
+            window.canvasState.tempHighlights = matches
+                .map(m => m.box)
+                .filter(box => Array.isArray(box) && box.length === 4);
             window.canvasState.render();
             
             if (matches.length > 0) {
@@ -185,6 +191,11 @@ class OCRTab {
             keywords: this.keywordsArea.value.split(',').map(s => s.trim()).filter(s => s),
             similarity_threshold: parseFloat(this.thresholdInput.value)
         };
+
+        const currentRule = window.app?.currentRuleName;
+        if (currentRule) {
+            config.rule_name = currentRule;
+        }
 
         try {
             const response = await fetch(`/api/config/${game}/ocr`, {
@@ -219,11 +230,43 @@ class OCRTab {
     }
 
     setConfig(config) {
-        if (!config) return;
+        if (!config) return; // But allow clearing if empty/reset
+        
+        // Handle case where config might be null (e.g. override removed)
+        // If config is provided, use it. If not, maybe defaults?
+        // But loadRuleOCR handles the fallback logic.
+        
         this.enabledCheck.checked = config.enabled !== false;
         this.keywordsArea.value = (config.keywords || []).join(', ');
-        this.thresholdInput.value = config.threshold || 0.8;
-        if (this.thresholdVal) this.thresholdVal.textContent = (config.threshold || 0.8).toFixed(2);
+        // Use similarity_threshold (YAML field) with fallback to threshold (legacy)
+        const threshold = config.similarity_threshold ?? config.threshold ?? 0.8;
+        this.thresholdInput.value = threshold;
+        if (this.thresholdVal) this.thresholdVal.textContent = threshold.toFixed(2);
+    }
+
+    loadRuleOCR(ruleName) {
+        const config = window.app?.config;
+        if (!config?.detection) return;
+        
+        let ocr = config.detection.ocr || {}; // default global
+        
+        if (ruleName) {
+            const rules = config.detection.rules || [];
+            const rule = rules.find(r => r.name === ruleName);
+            if (rule?.detection_overrides?.ocr) {
+                // Merge overrides with global defaults or replace?
+                // Typically overrides replace specific fields, but for object like OCR
+                // it's usually a full replacement or merge. 
+                // Let's assume merge for safety but usually UI shows the specific set.
+                // If the user hasn't overridden OCR, we show global.
+                ocr = { ...config.detection.ocr, ...rule.detection_overrides.ocr };
+            }
+        }
+        
+        this.setConfig(ocr);
+        if (window.app?.showStatus) {
+            window.app.showStatus(ruleName ? `已加载规则 ${ruleName} 的 OCR` : '已加载全局 OCR');
+        }
     }
 }
 

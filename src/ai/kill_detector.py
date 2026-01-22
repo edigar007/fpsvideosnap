@@ -182,41 +182,163 @@ class KillDetector:
             'template': template_bool
         }
 
-    def _evaluate_rules(self, signal_booleans: Dict[str, bool]) -> Optional[bool]:
+    def _merge_detection_config(self, rule: dict) -> dict:
         """
-        Evaluate OR-of-AND rules.
+        Merge rule.detection_overrides with global detection config.
+        Rule overrides take precedence. Uses deep merge for nested dicts.
+        """
+        detection_cfg = self.config.get('detection', {}).copy()
+        overrides = rule.get('detection_overrides', {})
         
-        Returns:
-        - True if ANY enabled rule is satisfied (all signals in require are True)
-        - False if rules exist but NONE are satisfied (or all disabled)
-        - None if rules mode is not active (rules list is empty or missing)
+        if not overrides:
+            return detection_cfg
+        
+        # Deep merge overrides into detection_cfg
+        for key, value in overrides.items():
+            if key in detection_cfg and isinstance(detection_cfg[key], dict) and isinstance(value, dict):
+                # Deep merge nested dicts (e.g., 'ocr', 'colors')
+                detection_cfg[key] = {**detection_cfg[key], **value}
+            else:
+                detection_cfg[key] = value
+        
+        return detection_cfg
+
+    def _compute_rule_signals(self, frame: np.ndarray, detection_cfg: dict, cached_color_pct: Optional[float] = None, yolo_conf: Optional[float] = None) -> dict:
         """
-        # If no rules defined at all, fall back to legacy mode
+        Compute detection signals using the provided detection config.
+        Similar to _precise_detect but uses provided config instead of self.config.
+        """
+        signals = {}
+        
+        # Get ROI from config
+        roi = detection_cfg.get('killfeed_roi', [0, 0, 1, 1])
+        h, w = frame.shape[:2]
+        roi_px = [int(roi[0] * w), int(roi[1] * h), int(roi[2] * w), int(roi[3] * h)]
+        
+        # OCR signal
+        ocr_cfg = detection_cfg.get('ocr', {})
+        ocr_enabled = ocr_cfg.get('enabled', False)
+        if ocr_enabled and self.ocr:
+            keywords = ocr_cfg.get('keywords', ["击杀", "KILL"])
+            res = self.ocr.find_keywords(frame, keywords, roi=roi_px)
+            if res['found']:
+                # fuzzy match gives 0-100, we want 0-1.0
+                signals['ocr'] = res['confidence'] / 100.0 if res['confidence'] > 1.0 else res['confidence']
+            else:
+                signals['ocr'] = 0.0
+        else:
+            signals['ocr'] = 0.0
+        
+        # Template signal
+        max_template_conf = 0.0
+        templates_cfg = detection_cfg.get('templates', {})
+        if not templates_cfg:
+            # Fallback to all loaded templates if not specified
+            for t_name in self.cv.templates:
+                _, score = self.cv.match_template(frame, t_name, roi=roi)
+                max_template_conf = max(max_template_conf, score)
+        else:
+            for t_name in templates_cfg:
+                if t_name in self.cv.templates:
+                    _, score = self.cv.match_template(frame, t_name, roi=roi)
+                    max_template_conf = max(max_template_conf, score)
+        signals['template'] = max_template_conf
+        
+        # Color signal
+        colors_cfg = detection_cfg.get('colors', {})
+        if cached_color_pct is not None and not detection_cfg.get('_force_color_recompute'):
+            signals['color'] = min(cached_color_pct * 50, 1.0)
+        else:
+            max_color_conf = 0.0
+            for color_name, color_cfg in colors_cfg.items():
+                hsv_lower = color_cfg.get('hsv_lower', color_cfg.get('lower'))
+                hsv_upper = color_cfg.get('hsv_upper', color_cfg.get('upper'))
+                if hsv_lower and hsv_upper:
+                    tolerance = color_cfg.get('tolerance', 0)
+                    if tolerance > 0:
+                        hsv_lower = [max(0, hsv_lower[0] - tolerance), max(0, hsv_lower[1] - tolerance), max(0, hsv_lower[2] - tolerance)]
+                        hsv_upper = [min(179, hsv_upper[0] + tolerance), min(255, hsv_upper[1] + tolerance), min(255, hsv_upper[2] + tolerance)]
+                    match_percent = self.cv.detect_color(frame, hsv_lower, hsv_upper, roi=roi)
+                    max_color_conf = max(max_color_conf, min(match_percent * 50, 1.0))
+            signals['color'] = max_color_conf
+        
+        # YOLO signal (YOLO uses full frame, not ROI, so no config dependency)
+        if yolo_conf is not None:
+            signals['yolo'] = yolo_conf
+        else:
+            yolo_detections = self.yolo.detect_single(frame)
+            max_yolo_conf = max((d['conf'] for d in yolo_detections if d['name'] == 'kill'), default=0.0)
+            signals['yolo'] = max_yolo_conf
+        
+        return signals
+
+    def _get_signal_booleans_for_config(self, signals: dict, detection_cfg: dict, cached_color_pct: Optional[float] = None) -> dict:
+        """Convert signals to booleans using the provided detection config."""
+        ocr_bool = signals.get('ocr', 0.0) > 0
+        yolo_bool = signals.get('yolo', 0.0) > 0
+        
+        prefilter_cfg = detection_cfg.get('prefilter', {})
+        color_threshold = prefilter_cfg.get('color_threshold', 0.01)
+        
+        if cached_color_pct is not None:
+            color_bool = cached_color_pct >= color_threshold
+        else:
+            color_bool = signals.get('color', 0.0) > 0
+        
+        template_bool = False
+        templates_cfg = detection_cfg.get('templates', {})
+        if not templates_cfg:
+            # Check all loaded templates with default 0.8
+            if signals.get('template', 0.0) >= 0.8:
+                template_bool = True
+        else:
+            for t_name, t_cfg in templates_cfg.items():
+                t_threshold = t_cfg.get('threshold', 0.8) if isinstance(t_cfg, dict) else 0.8
+                if signals.get('template', 0.0) >= t_threshold:
+                    template_bool = True
+                    break
+        
+        return {
+            'ocr': ocr_bool,
+            'yolo': yolo_bool,
+            'color': color_bool,
+            'template': template_bool
+        }
+
+    def _evaluate_rules(self, frame: np.ndarray, cached_color_pct: Optional[float] = None, yolo_conf: Optional[float] = None) -> Optional[bool]:
+        """
+        Evaluate OR-of-AND rules with per-rule detection_overrides.
+        
+        For each enabled rule:
+        1. Compute effective detection config (global + rule overrides)
+        2. Run signal detection with that config
+        3. Convert to booleans and check if rule is satisfied
+        
+        Returns True if ANY rule matches, False if rules exist but none match, None if no rules.
+        """
         if not self.rules:
             return None
         
-        # Filter to only enabled rules
         enabled_rules = [r for r in self.rules if r.get('enabled', True)]
-        
         if not enabled_rules:
-            # Rules are defined but all disabled → rules mode with no matches
             return False
-            return None
         
-        # OR-of-AND: check if any rule is fully satisfied
         for rule in enabled_rules:
+            # Get effective detection config for this rule
+            effective_cfg = self._merge_detection_config(rule)
+            
+            # Compute signals with rule-specific config
+            signals = self._compute_rule_signals(frame, effective_cfg, cached_color_pct, yolo_conf)
+            
+            # Convert to booleans
+            signal_booleans = self._get_signal_booleans_for_config(signals, effective_cfg, cached_color_pct)
+            
+            # Check if rule is satisfied (AND of required signals)
             require = rule.get('require', [])
-            if not require:
-                continue  # Skip empty require (should be caught by validation)
-            
-            # AND: all signals in require must be True
-            all_satisfied = all(signal_booleans.get(sig, False) for sig in require)
-            
-            if all_satisfied:
+            if require and all(signal_booleans.get(sig, False) for sig in require):
                 logger.debug(f"Rule matched: {rule.get('name', 'unnamed')}")
                 return True
         
-        # No rule was satisfied
         return False
 
     def _precise_detect(self, frame: np.ndarray, yolo_conf: Optional[float] = None, cached_color_pct: Optional[float] = None) -> Dict:
@@ -336,8 +458,7 @@ class KillDetector:
             return results
 
         # Step 4: Rules mode OR legacy weighted scoring
-        signal_booleans = self._get_signal_booleans(signals, cached_color_pct)
-        rules_result = self._evaluate_rules(signal_booleans)
+        rules_result = self._evaluate_rules(frame, cached_color_pct)
         
         if rules_result is not None:
             # Rules mode: is_kill from rules, confidence is 1.0 or 0.0
@@ -390,8 +511,7 @@ class KillDetector:
 
             # Rules mode OR legacy weighted scoring
             profiler.start('batch_calculate_confidence')
-            signal_booleans = self._get_signal_booleans(signals, cached_color)
-            rules_result = self._evaluate_rules(signal_booleans)
+            rules_result = self._evaluate_rules(frame, cached_color, yolo_conf=max_yolo_conf)
             
             if rules_result is not None:
                 # Rules mode

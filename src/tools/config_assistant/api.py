@@ -79,10 +79,17 @@ def get_config(game):
 def update_roi(game):
     data = request.json
     roi = data.get("roi") # [x, y, w, h] as relative coordinates
+    rule_name = data.get("rule_name")
+    
     if not isinstance(roi, list) or len(roi) != 4:
         return jsonify({"error": "Invalid ROI format. Expected [x, y, w, h]"}), 400
     
-    if config_manager.update_config_section(game, "detection.killfeed_roi", roi):
+    if rule_name:
+        success = config_manager.update_rule_override(game, rule_name, "killfeed_roi", roi)
+    else:
+        success = config_manager.update_config_section(game, "detection.killfeed_roi", roi)
+        
+    if success:
         # Return updated config for preview
         config = config_manager.get_config(game)
         return jsonify({"message": "ROI updated successfully", "config": config})
@@ -94,13 +101,19 @@ def update_ocr(game):
     enabled = data.get("enabled", True)
     keywords = data.get("keywords")
     similarity = data.get("similarity_threshold", 0.8)
+    rule_name = data.get("rule_name")
     
     if not isinstance(keywords, list):
         return jsonify({"error": "Keywords must be a list"}), 400
-        
-    config_manager.update_config_section(game, "detection.ocr.enabled", enabled)
-    config_manager.update_config_section(game, "detection.ocr.keywords", keywords)
-    config_manager.update_config_section(game, "detection.ocr.similarity_threshold", similarity)
+    
+    if rule_name:
+        config_manager.update_rule_override(game, rule_name, "ocr.enabled", enabled)
+        config_manager.update_rule_override(game, rule_name, "ocr.keywords", keywords)
+        config_manager.update_rule_override(game, rule_name, "ocr.similarity_threshold", similarity)
+    else:
+        config_manager.update_config_section(game, "detection.ocr.enabled", enabled)
+        config_manager.update_config_section(game, "detection.ocr.keywords", keywords)
+        config_manager.update_config_section(game, "detection.ocr.similarity_threshold", similarity)
     
     # Return updated config for preview
     config = config_manager.get_config(game)
@@ -109,6 +122,7 @@ def update_ocr(game):
 @api_bp.route("/config/<game>/templates", methods=["PUT", "POST"])
 def update_templates_config(game):
     data = request.json
+    rule_name = data.get("rule_name")
     
     # POST: Add a single template
     if request.method == "POST":
@@ -125,13 +139,26 @@ def update_templates_config(game):
         if not config:
             return jsonify({"error": f"Config for {game} not found"}), 404
             
-        templates = config.get("detection", {}).get("templates", {})
+        if rule_name:
+            rules = config.get("detection", {}).get("rules", [])
+            target_rule = next((r for r in rules if r.get("name") == rule_name), None)
+            if not target_rule:
+                return jsonify({"error": f"Rule '{rule_name}' not found"}), 404
+            templates = target_rule.get("detection_overrides", {}).get("templates", {})
+        else:
+            templates = config.get("detection", {}).get("templates", {})
+            
         template_data = {"roi": roi, "threshold": threshold}
         if path:
             template_data["path"] = path
         templates[name] = template_data
         
-        if config_manager.update_config_section(game, "detection.templates", templates):
+        if rule_name:
+            success = config_manager.update_rule_override(game, rule_name, "templates", templates)
+        else:
+            success = config_manager.update_config_section(game, "detection.templates", templates)
+            
+        if success:
             config = config_manager.get_config(game)
             return jsonify({"message": f"Template '{name}' added successfully", "config": config})
         return jsonify({"error": "Failed to add template"}), 500
@@ -141,10 +168,16 @@ def update_templates_config(game):
     if not isinstance(templates, dict):
         return jsonify({"error": "Templates must be a dictionary"}), 400
         
-    if config_manager.update_config_section(game, "detection.templates", templates):
+    if rule_name:
+        success = config_manager.update_rule_override(game, rule_name, "templates", templates)
+    else:
+        success = config_manager.update_config_section(game, "detection.templates", templates)
+        
+    if success:
         config = config_manager.get_config(game)
         return jsonify({"message": "Templates configuration updated successfully", "config": config})
     return jsonify({"error": "Failed to update templates configuration"}), 500
+
 
 @api_bp.route("/config/<game>/templates/<name>/threshold", methods=["PATCH"])
 def update_template_threshold(game, name):
@@ -189,6 +222,7 @@ def delete_template_from_config(game, name):
 @api_bp.route("/config/<game>/colors", methods=["PUT", "POST"])
 def update_colors(game):
     data = request.json
+    rule_name = data.get("rule_name")
     
     # POST: Add a single color
     if request.method == "POST":
@@ -205,14 +239,27 @@ def update_colors(game):
         if not config:
             return jsonify({"error": f"Config for {game} not found"}), 404
             
-        colors = config.get("detection", {}).get("colors", {})
+        if rule_name:
+            rules = config.get("detection", {}).get("rules", [])
+            target_rule = next((r for r in rules if r.get("name") == rule_name), None)
+            if not target_rule:
+                return jsonify({"error": f"Rule '{rule_name}' not found"}), 404
+            colors = target_rule.get("detection_overrides", {}).get("colors", {})
+        else:
+            colors = config.get("detection", {}).get("colors", {})
+            
         colors[name] = {
             "hsv_lower": hsv_lower,
             "hsv_upper": hsv_upper,
             "tolerance": tolerance
         }
         
-        if config_manager.update_config_section(game, "detection.colors", colors):
+        if rule_name:
+            success = config_manager.update_rule_override(game, rule_name, "colors", colors)
+        else:
+            success = config_manager.update_config_section(game, "detection.colors", colors)
+            
+        if success:
             config = config_manager.get_config(game)
             return jsonify({"message": f"Color '{name}' added successfully", "config": config})
         return jsonify({"error": "Failed to add color"}), 500
@@ -222,10 +269,16 @@ def update_colors(game):
     if not isinstance(colors, dict):
         return jsonify({"error": "Colors must be a dictionary"}), 400
         
-    if config_manager.update_config_section(game, "detection.colors", colors):
+    if rule_name:
+        success = config_manager.update_rule_override(game, rule_name, "colors", colors)
+    else:
+        success = config_manager.update_config_section(game, "detection.colors", colors)
+        
+    if success:
         config = config_manager.get_config(game)
         return jsonify({"message": "Colors configuration updated successfully", "config": config})
     return jsonify({"error": "Failed to update colors configuration"}), 500
+
 
 @api_bp.route("/config/<game>/colors/<name>/tolerance", methods=["PATCH"])
 def update_color_tolerance(game, name):
@@ -299,6 +352,41 @@ def ocr_detect():
     try:
         ocr_service = get_ocr_service()
         results = ocr_service.detect(image_path, roi)
+        
+        # Supplement 'box' field [x, y, w, h] (0-1 relative to ROI) for frontend
+        if roi and results:
+            try:
+                with Image.open(image_path) as img:
+                    img_w, img_h = img.size
+                
+                rx, ry, rw, rh = roi
+                roi_px = [rx * img_w, ry * img_h, rw * img_w, rh * img_h]
+                
+                for res in results:
+                    bbox = res.get("bbox")
+                    if bbox and isinstance(bbox, list) and len(bbox) >= 4:
+                        # bbox is [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+                        xs = [p[0] for p in bbox]
+                        ys = [p[1] for p in bbox]
+                        min_x, max_x = min(xs), max(xs)
+                        min_y, max_y = min(ys), max(ys)
+                        
+                        # Clamp to ROI boundaries
+                        c_min_x = max(roi_px[0], min(roi_px[0] + roi_px[2], min_x))
+                        c_max_x = max(roi_px[0], min(roi_px[0] + roi_px[2], max_x))
+                        c_min_y = max(roi_px[1], min(roi_px[1] + roi_px[3], min_y))
+                        c_max_y = max(roi_px[1], min(roi_px[1] + roi_px[3], max_y))
+                        
+                        # Convert to relative coordinates within ROI
+                        if roi_px[2] > 0 and roi_px[3] > 0:
+                            box_x = (c_min_x - roi_px[0]) / roi_px[2]
+                            box_y = (c_min_y - roi_px[1]) / roi_px[3]
+                            box_w = (c_max_x - c_min_x) / roi_px[2]
+                            box_h = (c_max_y - c_min_y) / roi_px[3]
+                            res["box"] = [float(box_x), float(box_y), float(box_w), float(box_h)]
+            except Exception as e:
+                logger.error(f"Error calculating relative boxes for OCR: {e}")
+
         logger.info(f"OCR API returning {len(results)} results")
         return jsonify({"results": results})
     except OCRUnavailableError as e:
@@ -515,6 +603,46 @@ def _validate_rules(rules):
         if name in seen_names:
             raise ValueError(f"detection.rules[{i}].name: duplicate name '{name}'")
         seen_names.add(name)
+
+        # Validate detection_overrides if present
+        if "detection_overrides" in rule:
+            overrides = rule["detection_overrides"]
+            if not isinstance(overrides, dict):
+                raise ValueError(f"detection.rules[{i}].detection_overrides must be a dict")
+            
+            # ROI validation
+            if "killfeed_roi" in overrides:
+                roi = overrides["killfeed_roi"]
+                if not isinstance(roi, list) or len(roi) != 4:
+                    raise ValueError(f"detection.rules[{i}].detection_overrides.killfeed_roi must be a list of 4 numbers")
+            
+            # OCR validation
+            if "ocr" in overrides:
+                ocr = overrides["ocr"]
+                if not isinstance(ocr, dict):
+                    raise ValueError(f"detection.rules[{i}].detection_overrides.ocr must be a dict")
+                if "keywords" in ocr and not isinstance(ocr["keywords"], list):
+                    raise ValueError(f"detection.rules[{i}].detection_overrides.ocr.keywords must be a list")
+                if "similarity_threshold" in ocr and not isinstance(ocr["similarity_threshold"], (int, float)):
+                    raise ValueError(f"detection.rules[{i}].detection_overrides.ocr.similarity_threshold must be a number")
+                if "similarity_threshold" in ocr and not (0 <= ocr["similarity_threshold"] <= 1):
+                    raise ValueError(f"detection.rules[{i}].detection_overrides.ocr.similarity_threshold must be 0-1")
+            
+            # Templates validation
+            if "templates" in overrides:
+                if not isinstance(overrides["templates"], dict):
+                    raise ValueError(f"detection.rules[{i}].detection_overrides.templates must be a dict")
+            
+            # Colors validation
+            if "colors" in overrides:
+                colors = overrides["colors"]
+                if not isinstance(colors, dict):
+                    raise ValueError(f"detection.rules[{i}].detection_overrides.colors must be a dict")
+                for cname, cdata in colors.items():
+                    if not isinstance(cdata, dict):
+                        raise ValueError(f"detection.rules[{i}].detection_overrides.colors.{cname} must be a dict")
+                    if "hsv_lower" not in cdata or "hsv_upper" not in cdata:
+                        raise ValueError(f"detection.rules[{i}].detection_overrides.colors.{cname} must have hsv_lower and hsv_upper")
 
 
 @api_bp.route("/config/<game>/rules", methods=["GET"])

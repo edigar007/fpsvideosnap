@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // App State
     const appState = {
         currentGame: '',
+        currentRuleName: null,  // null = global, string = specific rule
         config: {
             game: '',
             detection: {
@@ -312,12 +313,53 @@ document.addEventListener('DOMContentLoaded', () => {
         statusMessage.className = `status-badge ${type}`;
         setTimeout(() => {
             if (statusMessage.textContent === msg) {
-                statusMessage.textContent = '准备就绪';
-                statusMessage.className = 'status-badge';
+                // If we are in rule mode, restore rule status, else 'Ready'
+                if (appState.currentRuleName) {
+                    updateRuleIndicator();
+                } else {
+                    statusMessage.textContent = '准备就绪';
+                    statusMessage.className = 'status-badge';
+                }
             }
         }, 3000);
     }
     
+    function setCurrentRule(ruleName) {
+        appState.currentRuleName = ruleName;
+        
+        // Dispatch event for tabs to update
+        document.dispatchEvent(new CustomEvent('ruleChanged', { 
+            detail: { ruleName } 
+        }));
+        
+        // Update status indicator
+        updateRuleIndicator();
+    }
+
+    function updateRuleIndicator() {
+        // We reuse status-message for now, or we can add a dedicated indicator.
+        // The requirements asked for "Status indicator showing '当前编辑: [rule_name]'"
+        // Let's create/update a dedicated element if possible, or use the existing status area more effectively.
+        // Actually, looking at index.html, there is a .status-indicator div wrapping #status-message.
+        // I'll add a separate element for rule status in index.html, but here let's assume it exists.
+        
+        const ruleIndicator = document.getElementById('current-rule-indicator');
+        if (ruleIndicator) {
+            if (appState.currentRuleName) {
+                ruleIndicator.textContent = `当前编辑: ${appState.currentRuleName}`;
+                ruleIndicator.classList.add('rule-mode');
+                ruleIndicator.style.display = 'inline-block';
+            } else {
+                ruleIndicator.textContent = '编辑全局配置';
+                ruleIndicator.classList.remove('rule-mode');
+                ruleIndicator.style.display = 'none'; // Hide when global to avoid clutter? Or show "Global"? 
+                // Requirement says: "编辑全局" button to deselect.
+                // Requirement says: Status indicator showing "当前编辑: [rule_name]" or "编辑全局配置"
+                ruleIndicator.style.display = 'inline-block';
+            }
+        }
+    }
+
     // Expose globally
     window.showStatus = showStatus;
     window.app = {
@@ -326,7 +368,9 @@ document.addEventListener('DOMContentLoaded', () => {
         hideLoading,
         get config() { return appState.config; },
         set config(val) { appState.config = val; },
-        get imagePath() { return appState.currentImagePath; }
+        get imagePath() { return appState.currentImagePath; },
+        get currentRuleName() { return appState.currentRuleName; },
+        setCurrentRule
     };
 
     function showLoading(text = '正在处理...') {

@@ -851,6 +851,27 @@ button {
     overflow: hidden;
 }
 
+.rule-item.selected {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-muted);
+}
+
+.rule-item.global-config-item {
+    margin-bottom: 15px;
+    border-style: dashed;
+}
+
+.rule-item.global-config-item:hover {
+    border-color: var(--accent);
+    background: var(--bg-surface);
+}
+
+.rule-item.global-config-item.selected {
+    border-style: solid;
+    border-left: 3px solid var(--accent);
+    background: var(--accent-muted);
+}
+
 .rule-header {
     padding: 8px 12px;
     background: var(--bg-inset);
