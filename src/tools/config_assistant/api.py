@@ -467,3 +467,86 @@ def preview_color():
     except Exception as e:
         logger.error(f"Error previewing color: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+# --- Rules API ---
+
+VALID_SIGNALS = {"ocr", "template", "color", "yolo"}
+
+
+def _validate_rules(rules):
+    """Validate rules structure. Raises ValueError with descriptive message on failure."""
+    if not isinstance(rules, list):
+        raise ValueError("detection.rules must be a list")
+    
+    seen_names = set()
+    for i, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            raise ValueError(f"detection.rules[{i}] must be a dict")
+        
+        # Check required fields
+        if "name" not in rule:
+            raise ValueError(f"detection.rules[{i}].name is required")
+        if "enabled" not in rule:
+            raise ValueError(f"detection.rules[{i}].enabled is required")
+        if "require" not in rule:
+            raise ValueError(f"detection.rules[{i}].require is required")
+        
+        name = rule["name"]
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"detection.rules[{i}].name must be a non-empty string")
+        
+        if not isinstance(rule["enabled"], bool):
+            raise ValueError(f"detection.rules[{i}].enabled must be a boolean")
+        
+        require = rule["require"]
+        if not isinstance(require, list):
+            raise ValueError(f"detection.rules[{i}].require must be a list")
+        if len(require) == 0:
+            raise ValueError(f"detection.rules[{i}].require cannot be empty")
+        
+        for j, signal in enumerate(require):
+            if not isinstance(signal, str):
+                raise ValueError(f"detection.rules[{i}].require[{j}] must be a string")
+            if signal not in VALID_SIGNALS:
+                raise ValueError(f"detection.rules[{i}].require[{j}]: unknown signal '{signal}'. Valid: {VALID_SIGNALS}")
+        
+        # Check for duplicate names
+        if name in seen_names:
+            raise ValueError(f"detection.rules[{i}].name: duplicate name '{name}'")
+        seen_names.add(name)
+
+
+@api_bp.route("/config/<game>/rules", methods=["GET"])
+def get_rules(game):
+    """Get detection rules for a game."""
+    config = config_manager.get_config(game)
+    if not config:
+        return jsonify({"error": f"Config for {game} not found"}), 404
+    
+    rules = config.get("detection", {}).get("rules", [])
+    return jsonify({"rules": rules})
+
+
+@api_bp.route("/config/<game>/rules", methods=["PUT"])
+def update_rules(game):
+    """Update detection rules for a game."""
+    config = config_manager.get_config(game)
+    if not config:
+        return jsonify({"error": f"Config for {game} not found"}), 404
+    
+    data = request.json
+    rules = data.get("rules")
+    
+    if rules is None:
+        return jsonify({"error": "'rules' field is required"}), 400
+    
+    try:
+        _validate_rules(rules)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    
+    if config_manager.update_config_section(game, "detection.rules", rules):
+        config = config_manager.get_config(game)
+        return jsonify({"message": "Rules updated", "config": config})
+    return jsonify({"error": "Failed to update rules"}), 500

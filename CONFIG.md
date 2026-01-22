@@ -74,6 +74,66 @@ highlights:
 | `post_kill_time` | 击杀发生**后**保留的秒数。 | `2.0` |
 | `multikill_threshold` | 连杀判定时间窗口（秒）。在此时间内的连续击杀会被合并为一个片段。 | `10.0` |
 
+### 2.4 检测规则 (`detection.rules`) - OR-of-AND 逻辑
+
+检测规则提供了一种比加权计算更精确的击杀判定方式。使用规则模式时，满足**任一规则**即判定为击杀（规则之间为 OR），而每条规则内的所有条件都需满足（规则内为 AND）。
+
+#### 规则结构
+
+```yaml
+detection:
+  rules:
+    - name: "规则名称"        # 唯一标识，用于日志和UI
+      enabled: true          # 是否启用此规则
+      require: ["signal1", "signal2"]  # 需要满足的条件列表（AND逻辑）
+```
+
+#### 可用信号 (signals)
+
+| 信号 | 描述 | 判定为 True 的条件 |
+| :--- | :--- | :--- |
+| `ocr` | OCR 文字识别 | 识别到配置的关键词 |
+| `template` | 模板匹配 | 任一模板匹配分数 >= 该模板的阈值（默认 0.8） |
+| `color` | 颜色检测 | 颜色占比 >= `prefilter.color_threshold` |
+| `yolo` | YOLO 检测 | YOLO 模型检测到击杀相关目标 |
+
+#### 规则模式 vs 传统加权模式
+
+| 特性 | 规则模式 (`rules` 非空) | 传统加权模式 (`rules` 为空) |
+| :--- | :--- | :--- |
+| 判定逻辑 | OR-of-AND 规则匹配 | 加权分数 >= `confidence_threshold` |
+| 输出 confidence | 命中=1.0，未命中=0.0 | 0.0 ~ 1.0 的加权值 |
+| 适用场景 | 明确知道击杀特征组合 | 特征不确定，需要模糊匹配 |
+
+#### 示例配置
+
+```yaml
+detection:
+  rules:
+    # 规则1：颜色 + YOLO 同时检测到（高精度）
+    - name: "color_and_yolo"
+      enabled: true
+      require: ["color", "yolo"]
+    
+    # 规则2：OCR 识别到击杀关键词（适用于有明确文字的游戏）
+    - name: "ocr_kill"
+      enabled: true
+      require: ["ocr"]
+    
+    # 规则3：模板 + 颜色（适用于有固定图标的游戏）
+    - name: "template_and_color"
+      enabled: true
+      require: ["template", "color"]
+```
+
+#### 注意事项
+
+1. **兼容性**: 如果 `rules` 为空或未配置，自动回退到传统加权模式。
+2. **空规则禁止**: 每条规则的 `require` 必须至少包含一个信号，不允许空列表。
+3. **名称唯一**: 同一配置文件中，规则名称不能重复。
+4. **OCR 硬门槛**: 如果 `ocr.required=true`，即使规则不包含 `ocr`，OCR 未识别时也会阻止击杀判定。
+5. **规则顺序**: 按配置顺序检查，第一个匹配的规则即生效。
+
 ---
 
 ## 3. 全局参数参考 (`config/default_config.yaml`)

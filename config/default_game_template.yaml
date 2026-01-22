@@ -19,7 +19,21 @@ detection:
   # 颜色检测配置
   colors: {}  # 待配置
   
-  # 信号权重
+  # 检测规则 (OR-of-AND 逻辑)
+  # 规则之间为 OR（满足任一规则即判定为击杀）
+  # 规则内条件为 AND（所有条件都需满足）
+  # 留空则使用传统加权计算方式
+  rules: []
+  # 示例：
+  # rules:
+  #   - name: "color_and_yolo"
+  #     enabled: true
+  #     require: ["color", "yolo"]
+  #   - name: "ocr_only"
+  #     enabled: true
+  #     require: ["ocr"]
+  
+  # 信号权重（仅在 rules 为空时生效）
   weights:
     ocr: 0.4
     template: 0.3
@@ -35,7 +49,7 @@ detection:
   use_threading: true  # 是否启用多线程
   max_workers: 4  # 线程池大小，建议设置为 CPU 核心数
   
-  # 置信度阈值
+  # 置信度阈值（仅在 rules 为空时生效）
   confidence_threshold: 0.5
 
 highlights:

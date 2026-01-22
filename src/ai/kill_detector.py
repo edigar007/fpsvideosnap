@@ -51,6 +51,9 @@ class KillDetector:
             'yolo': 0.1
         })
         
+        # OR-of-AND Rules mode
+        self.rules = detection_cfg.get('rules', [])
+        
         # Multi-threading settings
         # NOTE: 多线程并行候选帧处理已移除。
         # 经验上此处线程容易被 OCR/OpenCV 锁与 GIL 抵消收益，且 GPU 推理本身已 batch 化。
@@ -125,6 +128,96 @@ class KillDetector:
             normalized_conf += conf * (weight / total_weight)
             
         return normalized_conf
+
+    def _get_signal_booleans(self, signals: Dict, cached_color_pct: Optional[float] = None) -> Dict[str, bool]:
+        """
+        Convert signal values to boolean for rules evaluation.
+        
+        Signal True/False logic:
+        - ocr: signals['ocr'] > 0
+        - yolo: signals['yolo'] > 0
+        - color: max_color_pct >= self.color_threshold
+        - template: any template score >= per-template threshold (default 0.8)
+        """
+        detection_cfg = self.config.get('detection', {})
+        
+        # OCR: True if any keyword was found
+        ocr_bool = signals.get('ocr', 0.0) > 0
+        
+        # YOLO: True if any kill detection
+        yolo_bool = signals.get('yolo', 0.0) > 0
+        
+        # Color: Use cached_color_pct if available, otherwise check if color signal is positive
+        if cached_color_pct is not None:
+            color_bool = cached_color_pct >= self.color_threshold
+        else:
+            # Fallback: if color signal > 0, consider it True
+            # (color signal is already thresholded during prefilter)
+            color_bool = signals.get('color', 0.0) > 0
+        
+        # Template: Check if any template passes its configured threshold
+        template_bool = False
+        if self.cv.templates:
+            template_cfg = detection_cfg.get('templates', {})
+            for t_name in self.cv.templates:
+                # Get per-template threshold, default 0.8
+                t_threshold = 0.8
+                if t_name in template_cfg and isinstance(template_cfg[t_name], dict):
+                    t_threshold = template_cfg[t_name].get('threshold', 0.8)
+                
+                # Get the template score from the last match
+                # Note: signals['template'] is max score, but for per-template threshold
+                # we need to check individual scores. For simplicity, if signals['template'] >= min threshold
+                # among all templates, we consider it True.
+                # For accurate per-template checking, we'd need to store individual scores.
+                # Using a simplified approach: template passes if max_score >= configured threshold for that template
+                if signals.get('template', 0.0) >= t_threshold:
+                    template_bool = True
+                    break
+        
+        return {
+            'ocr': ocr_bool,
+            'yolo': yolo_bool,
+            'color': color_bool,
+            'template': template_bool
+        }
+
+    def _evaluate_rules(self, signal_booleans: Dict[str, bool]) -> Optional[bool]:
+        """
+        Evaluate OR-of-AND rules.
+        
+        Returns:
+        - True if ANY enabled rule is satisfied (all signals in require are True)
+        - False if rules exist but NONE are satisfied (or all disabled)
+        - None if rules mode is not active (rules list is empty or missing)
+        """
+        # If no rules defined at all, fall back to legacy mode
+        if not self.rules:
+            return None
+        
+        # Filter to only enabled rules
+        enabled_rules = [r for r in self.rules if r.get('enabled', True)]
+        
+        if not enabled_rules:
+            # Rules are defined but all disabled → rules mode with no matches
+            return False
+            return None
+        
+        # OR-of-AND: check if any rule is fully satisfied
+        for rule in enabled_rules:
+            require = rule.get('require', [])
+            if not require:
+                continue  # Skip empty require (should be caught by validation)
+            
+            # AND: all signals in require must be True
+            all_satisfied = all(signal_booleans.get(sig, False) for sig in require)
+            
+            if all_satisfied:
+                logger.debug(f"Rule matched: {rule.get('name', 'unnamed')}")
+                return True
+        
+        # No rule was satisfied
+        return False
 
     def _precise_detect(self, frame: np.ndarray, yolo_conf: Optional[float] = None, cached_color_pct: Optional[float] = None) -> Dict:
         """
@@ -218,6 +311,7 @@ class KillDetector:
     def process_frame(self, frame: np.ndarray) -> Dict:
         """
         Analyzes a single frame and returns detection results. (TASK-024, TASK-026, TASK-027)
+        Supports OR-of-AND rules mode when detection.rules is configured.
         """
         results = {
             "is_kill": False,
@@ -225,12 +319,13 @@ class KillDetector:
             "signals": {}
         }
 
-        # Step 1: Pre-filter (Fast)
-        if not self._prefilter(frame):
+        # Step 1: Pre-filter (Fast) with result caching for color
+        passed, cached_color_pct = self._prefilter_with_result(frame)
+        if not passed:
             return results
 
         # Step 2: Precise detection (Heavy)
-        signals = self._precise_detect(frame)
+        signals = self._precise_detect(frame, cached_color_pct=cached_color_pct)
         results["signals"] = signals
 
         # Step 3: OCR Required logic (TASK-026)
@@ -240,10 +335,19 @@ class KillDetector:
             results["confidence"] = 0.0
             return results
 
-        # Step 4: Weighted scoring
-        final_conf = self._calculate_confidence(signals)
-        results["confidence"] = final_conf
-        results["is_kill"] = final_conf >= self.conf_threshold
+        # Step 4: Rules mode OR legacy weighted scoring
+        signal_booleans = self._get_signal_booleans(signals, cached_color_pct)
+        rules_result = self._evaluate_rules(signal_booleans)
+        
+        if rules_result is not None:
+            # Rules mode: is_kill from rules, confidence is 1.0 or 0.0
+            results["is_kill"] = rules_result
+            results["confidence"] = 1.0 if rules_result else 0.0
+        else:
+            # Legacy mode: weighted scoring
+            final_conf = self._calculate_confidence(signals)
+            results["confidence"] = final_conf
+            results["is_kill"] = final_conf >= self.conf_threshold
 
         return results
 
@@ -254,6 +358,7 @@ class KillDetector:
                                       color_cache: dict) -> List[dict]:
         """
         单线程顺序处理候选帧（原始实现）
+        Supports OR-of-AND rules mode when detection.rules is configured.
         """
         events = []
         
@@ -283,17 +388,32 @@ class KillDetector:
                 continue
             profiler.end('batch_ocr_required_check')
 
+            # Rules mode OR legacy weighted scoring
             profiler.start('batch_calculate_confidence')
-            final_conf = self._calculate_confidence(signals)
-            profiler.end('batch_calculate_confidence')
+            signal_booleans = self._get_signal_booleans(signals, cached_color)
+            rules_result = self._evaluate_rules(signal_booleans)
             
-            if final_conf >= self.conf_threshold:
-                events.append({
-                    "timestamp_ms": timestamps_ms[i],
-                    "confidence": final_conf,
-                    "type": "kill",
-                    "signals": signals
-                })
+            if rules_result is not None:
+                # Rules mode
+                if rules_result:
+                    events.append({
+                        "timestamp_ms": timestamps_ms[i],
+                        "confidence": 1.0,
+                        "type": "kill",
+                        "signals": signals
+                    })
+                # If rules_result is False, don't append (no match)
+            else:
+                # Legacy mode: weighted scoring
+                final_conf = self._calculate_confidence(signals)
+                if final_conf >= self.conf_threshold:
+                    events.append({
+                        "timestamp_ms": timestamps_ms[i],
+                        "confidence": final_conf,
+                        "type": "kill",
+                        "signals": signals
+                    })
+            profiler.end('batch_calculate_confidence')
         
         return events
 

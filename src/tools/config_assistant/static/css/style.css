@@ -841,3 +841,101 @@ button {
     font-weight: bold;
     color: var(--accent);
 }
+
+/* Rules List */
+.rule-item {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 10px;
+    overflow: hidden;
+}
+
+.rule-header {
+    padding: 8px 12px;
+    background: var(--bg-inset);
+    border-bottom: 1px solid var(--border);
+}
+
+.rule-name-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.rule-name-input {
+    flex: 1;
+    padding: 6px 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.rule-name-input:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+
+.rule-signals {
+    padding: 12px;
+}
+
+.rule-signals label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    display: block;
+}
+
+.signal-checkboxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.signal-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.signal-checkbox:hover {
+    border-color: var(--border-hover);
+}
+
+.signal-checkbox input {
+    margin: 0;
+}
+
+.signal-checkbox input:checked + span {
+    color: var(--accent);
+}
+
+.btn-icon {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.btn-icon:hover {
+    background: var(--error);
+    color: white;
+}
+
+.toggle.small {
+    transform: scale(0.8);
+}
+

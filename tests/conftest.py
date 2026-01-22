@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 # Mock heavy ML dependencies before any test imports
 # This allows tests to run in environments without GPU libraries
+# NOTE: cv2 (opencv-python) is NOT mocked because OpenCVMatcher tests need real cv2 functions
 _mock_modules = [
     'torch',
     'torch.cuda',
@@ -16,7 +17,6 @@ _mock_modules = [
     'ultralytics',
     'paddle',
     'paddleocr',
-    'cv2',
 ]
 
 for mod_name in _mock_modules:
