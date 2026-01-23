@@ -134,8 +134,21 @@ class ConfigManager:
                     break
             
             if target_rule is None:
-                logger.error(f"Rule '{rule_name}' not found for game: {game_name}")
-                return False
+                # Auto-create rule if it doesn't exist
+                logger.info(f"Auto-creating rule '{rule_name}' for game: {game_name}")
+                target_rule = {
+                    "name": rule_name,
+                    "enabled": True,
+                    "require": ["color"],
+                    "detection_overrides": {}
+                }
+                
+                if "detection" not in config:
+                    config["detection"] = {}
+                if "rules" not in config["detection"]:
+                    config["detection"]["rules"] = []
+                    
+                config["detection"]["rules"].append(target_rule)
 
             if "detection_overrides" not in target_rule:
                 target_rule["detection_overrides"] = {}

@@ -107,17 +107,21 @@ def update_ocr(game):
         return jsonify({"error": "Keywords must be a list"}), 400
     
     if rule_name:
-        config_manager.update_rule_override(game, rule_name, "ocr.enabled", enabled)
-        config_manager.update_rule_override(game, rule_name, "ocr.keywords", keywords)
-        config_manager.update_rule_override(game, rule_name, "ocr.similarity_threshold", similarity)
+        s1 = config_manager.update_rule_override(game, rule_name, "ocr.enabled", enabled)
+        s2 = config_manager.update_rule_override(game, rule_name, "ocr.keywords", keywords)
+        s3 = config_manager.update_rule_override(game, rule_name, "ocr.similarity_threshold", similarity)
+        success = s1 and s2 and s3
     else:
-        config_manager.update_config_section(game, "detection.ocr.enabled", enabled)
-        config_manager.update_config_section(game, "detection.ocr.keywords", keywords)
-        config_manager.update_config_section(game, "detection.ocr.similarity_threshold", similarity)
+        s1 = config_manager.update_config_section(game, "detection.ocr.enabled", enabled)
+        s2 = config_manager.update_config_section(game, "detection.ocr.keywords", keywords)
+        s3 = config_manager.update_config_section(game, "detection.ocr.similarity_threshold", similarity)
+        success = s1 and s2 and s3
     
-    # Return updated config for preview
-    config = config_manager.get_config(game)
-    return jsonify({"message": "OCR configuration updated successfully", "config": config})
+    if success:
+        # Return updated config for preview
+        config = config_manager.get_config(game)
+        return jsonify({"message": "OCR configuration updated successfully", "config": config})
+    return jsonify({"error": "Failed to update OCR configuration"}), 500
 
 @api_bp.route("/config/<game>/templates", methods=["PUT", "POST"])
 def update_templates_config(game):
@@ -142,9 +146,10 @@ def update_templates_config(game):
         if rule_name:
             rules = config.get("detection", {}).get("rules", [])
             target_rule = next((r for r in rules if r.get("name") == rule_name), None)
-            if not target_rule:
-                return jsonify({"error": f"Rule '{rule_name}' not found"}), 404
-            templates = target_rule.get("detection_overrides", {}).get("templates", {})
+            if target_rule:
+                templates = target_rule.get("detection_overrides", {}).get("templates", {})
+            else:
+                templates = {}
         else:
             templates = config.get("detection", {}).get("templates", {})
             
@@ -242,9 +247,10 @@ def update_colors(game):
         if rule_name:
             rules = config.get("detection", {}).get("rules", [])
             target_rule = next((r for r in rules if r.get("name") == rule_name), None)
-            if not target_rule:
-                return jsonify({"error": f"Rule '{rule_name}' not found"}), 404
-            colors = target_rule.get("detection_overrides", {}).get("colors", {})
+            if target_rule:
+                colors = target_rule.get("detection_overrides", {}).get("colors", {})
+            else:
+                colors = {}
         else:
             colors = config.get("detection", {}).get("colors", {})
             
