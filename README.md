@@ -58,9 +58,9 @@
 
 ## 📖 详细文档
 
-- [安装指南 (INSTALL.md)](INSTALL.md)
-- [配置说明 (CONFIG.md)](CONFIG.md)
-- [故障排除 (TROUBLESHOOTING.md)](TROUBLESHOOTING.md)
+- [安装指南 (INSTALL.md)](docs/INSTALL.md)
+- [配置说明 (CONFIG.md)](docs/CONFIG.md)
+- [故障排除 (TROUBLESHOOTING.md)](docs/TROUBLESHOOTING.md)
 
 ---
 

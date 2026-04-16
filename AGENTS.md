@@ -75,8 +75,16 @@ config/
   default_config.yaml      # Global defaults
   games/                   # Game-specific configs (battlefield6.yaml, etc.)
 
+docs/                      # Documentation
+  archive/                 # Archived design documents
+  INSTALL.md, etc.         # User and developer guides
+
+scripts/
+  debug/                   # Debug and verification scripts (e.g. debug_kill_detection.py)
+
 tests/
   integration/             # Integration tests
+  manual/                  # Manual/Ad-hoc test scripts
   test_*.py               # Unit tests (pytest-style)
 ```
 

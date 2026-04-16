@@ -1,6 +1,6 @@
 game_name: battlefield4
 global:
-  output_dir: "G:/Video/Battlefield 4/my_highlights"
+  output_dir: G:/Video/Battlefield 4/my_highlights
 detection:
   killfeed_roi:
   - 0.42423664122137406
@@ -35,9 +35,26 @@ detection:
     enabled: true
     color_threshold: 0.01
   confidence_threshold: 0.5
+  rules:
+  - name: rule_1
+    enabled: true
+    require:
+    - ocr
+    detection_overrides:
+      ocr:
+        enabled: true
+        keywords:
+        - 敵人撃斃
+        similarity_threshold: 0.9
+      killfeed_roi:
+      - 0.5540512751145422
+      - 0.248
+      - 0.20814358713762537
+      - 0.10200000000000004
 highlights:
   pre_kill_time: 6.0
   post_kill_time: 3.0
-  music_path: "assets/music/Johan Soderqvist、Patrik Andrén - Battlefield Classic Theme - Mayhem View.mp3"
+  music_path: assets/music/Johan Soderqvist、Patrik Andrén - Battlefield Classic Theme
+    - Mayhem View.mp3
 video:
   frame_interval_ms: 400
