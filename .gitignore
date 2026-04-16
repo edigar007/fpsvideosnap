@@ -45,3 +45,6 @@ models/
 
 # Config
 *.yaml.backup
+
+# Local planning artifacts
+.sisyphus/
