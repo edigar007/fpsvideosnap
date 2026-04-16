@@ -1,6 +1,6 @@
 import subprocess
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from src.utils.logger import logger
 from src.video.video_info import VideoInfo
 from src.video.transitions import TransitionManager
@@ -55,34 +55,54 @@ class VideoJoiner:
     def _join_with_ffmpeg(self, clip_paths: List[str], output_path: str) -> bool:
         """Uses FFmpeg to join clips. Supports both concat (no transitions) and xfade (with transitions)."""
         transition_type = self.highlight_cfg.get("transition_type", "fade")
-        
+
         # 如果禁用转场或转场类型为none，使用简单concat
         if transition_type == "none":
             return self._join_with_concat(clip_paths, output_path)
         else:
             # 使用xfade转场（可能有花屏问题）
             return self._join_with_xfade(clip_paths, output_path)
-    
+
+    def _build_normalized_input_filters(self, clip_count: int) -> Tuple[List[str], List[str], List[str]]:
+        """Normalize each input stream to start at timestamp zero before joining."""
+        filter_parts = []
+        video_labels = []
+        audio_labels = []
+
+        for i in range(clip_count):
+            video_label = f"vnorm{i}"
+            audio_label = f"anorm{i}"
+            filter_parts.append(f"[{i}:v]settb=AVTB,setpts=PTS-STARTPTS[{video_label}]")
+            filter_parts.append(
+                f"[{i}:a]aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS[{audio_label}]"
+            )
+            video_labels.append(video_label)
+            audio_labels.append(audio_label)
+
+        return filter_parts, video_labels, audio_labels
+
     def _join_with_concat(self, clip_paths: List[str], output_path: str) -> bool:
         """使用concat filter快速拼接，无转场效果"""
         try:
             # 使用concat filter
             cmd = [self.video_cfg.get("ffmpeg_path", "ffmpeg"), "-y"]
-            
+
             if self.hwaccel == "cuda":
                 cmd.extend(["-hwaccel", "cuda"])
-            
+
             # 添加所有输入
             for path in clip_paths:
                 cmd.extend(["-i", path])
-            
+
             # 构建concat filter
             n = len(clip_paths)
-            video_inputs = "".join([f"[{i}:v]" for i in range(n)])
-            audio_inputs = "".join([f"[{i}:a]" for i in range(n)])
-            
-            filter_complex = f"{video_inputs}concat=n={n}:v=1:a=0[vout];{audio_inputs}concat=n={n}:v=0:a=1[aout]"
-            
+            filter_parts, video_labels, audio_labels = self._build_normalized_input_filters(n)
+            video_inputs = "".join([f"[{label}]" for label in video_labels])
+            audio_inputs = "".join([f"[{label}]" for label in audio_labels])
+            filter_parts.append(f"{video_inputs}concat=n={n}:v=1:a=0[vout]")
+            filter_parts.append(f"{audio_inputs}concat=n={n}:v=0:a=1[aout]")
+            filter_complex = ";".join(filter_parts)
+
             cmd.extend([
                 "-filter_complex", filter_complex,
                 "-map", "[vout]",
@@ -92,6 +112,7 @@ class VideoJoiner:
                 "-b:v", self.bitrate,
                 "-g", str(self.fps * 2),
                 "-bf", "0",
+                "-force_key_frames", "0",
                 "-c:a", "aac",
                 "-b:a", "192k",
             ])
@@ -141,12 +162,12 @@ class VideoJoiner:
             cmd.extend(["-i", path])
 
         # Filter complex
-        filter_parts = []
-        
-        # Initial labels - 直接使用输入，所有clips已经用相同参数编码
-        last_v_label = "0:v"
-        last_a_label = "0:a"
-        
+        filter_parts, video_labels, audio_labels = self._build_normalized_input_filters(len(clip_paths))
+
+        # Initial labels - 使用归一化后的输入，避免首个clip把原始时间戳直接带入输出
+        last_v_label = video_labels[0]
+        last_a_label = audio_labels[0]
+
         current_offset = durations[0]
         
         for i in range(1, len(clip_paths)):
@@ -164,14 +185,14 @@ class VideoJoiner:
             # Video xfade
             next_v_label = f"v{i}"
             filter_parts.append(
-                f"[{last_v_label}][{i}:v]xfade=transition={trans}:duration={actual_transition_duration}:offset={offset}[{next_v_label}]"
+                f"[{last_v_label}][{video_labels[i]}]xfade=transition={trans}:duration={actual_transition_duration}:offset={offset}[{next_v_label}]"
             )
             last_v_label = next_v_label
-            
+
             # Audio acrossfade
             next_a_label = f"a{i}"
             filter_parts.append(
-                f"[{last_a_label}][{i}:a]acrossfade=d={actual_transition_duration}[{next_a_label}]"
+                f"[{last_a_label}][{audio_labels[i]}]acrossfade=d={actual_transition_duration}[{next_a_label}]"
             )
             last_a_label = next_a_label
             
@@ -193,6 +214,7 @@ class VideoJoiner:
             "-g", str(self.fps * 2),  # GOP size: 每2秒一个关键帧
             "-bf", "0",  # 禁用B帧，xfade需要简单的帧结构
             "-pix_fmt", "yuv420p",  # 确保像素格式一致
+            "-force_key_frames", "0",
             "-c:a", "aac",
             "-b:a", "192k",
         ])
