@@ -48,6 +48,28 @@
 .venv\Scripts\python.exe main.py --video sample.mp4 --game battlefield6 --debug --debug-visual
 ```
 
+## ⚙️ Config Assistant 配置助手
+
+Config Assistant 是一个本地 Web 配置工具，用来用截图交互式调整游戏识别参数，而不是手工反复编辑 YAML。
+
+启动方式：
+```bash
+.venv\Scripts\python.exe main.py config-assistant --port 8080
+```
+
+主要功能：
+- **游戏配置管理**：读取现有游戏配置，也可以基于 `config/default_game_template.yaml` 快速创建新游戏配置。
+- **ROI 区域标定**：上传游戏截图后，在画布上框选击杀信息区域，实时查看归一化坐标和区域预览，并保存到配置。
+- **OCR 关键词调试**：对当前 ROI 直接执行 OCR，查看识别结果，一键把识别到的文字加入关键词列表，并调整匹配阈值。
+- **模板匹配配置**：从截图中裁剪图标模板，写入模板路径和阈值，适合没有稳定文字但有固定 UI 图标的游戏。
+- **颜色采样与预览**：从截图中取样颜色，自动生成 HSV 范围和容差，并预览颜色掩码效果。
+- **规则编辑**：配置 `detection.rules` 的 OR-of-AND 逻辑，组合 `ocr`、`template`、`color`、`yolo` 等信号，并切换编辑全局配置或某条规则的 `detection_overrides`。
+- **实时 YAML 预览与导出**：右下角实时预览当前 YAML，完成后可直接导出配置文件。
+
+补充说明：
+- Config Assistant 默认只监听本机 `127.0.0.1`，启动后会自动打开浏览器。
+- OCR 预览功能依赖本地 OCR 环境；如果 PaddleOCR 初始化失败，ROI、模板、颜色、规则等非 OCR 功能仍可正常使用。
+
 ## 📂 项目结构
 
 - `config/`: 游戏识别参数与全局配置。
