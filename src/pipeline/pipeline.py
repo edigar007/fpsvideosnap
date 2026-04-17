@@ -589,10 +589,13 @@ class Pipeline:
             # 9. Cleanup
             if self.stages["cleanup"].status != StageStatus.SUCCESS:
                 self._update_stage("cleanup", StageStatus.RUNNING)
-                if not self.config.get("global", {}).get("debug", False):
+                keep_intermediates = bool(self.config.get("global", {}).get("debug", False)) or bool(
+                    self.config.get("video", {}).get("join_fix", {}).get("keep_intermediates", False)
+                )
+                if not keep_intermediates:
                     temp_manager.clean_all()
-                    if os.path.exists(self.checkpoint_file):
-                        os.remove(self.checkpoint_file)
+                if os.path.exists(self.checkpoint_file):
+                    os.remove(self.checkpoint_file)
                 self._update_stage("cleanup", StageStatus.SUCCESS)
 
             # 10. 打印性能分析报告
