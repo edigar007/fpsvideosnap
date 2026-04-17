@@ -310,7 +310,10 @@ def _run_processing_task(
                     import shutil
                     shutil.copy2(merged_path, final_path)
                 
-                if os.path.exists(merged_path) and merged_path != final_path:
+                keep_intermediates = bool(config.get("global", {}).get("debug", False)) or bool(
+                    config.get("video", {}).get("join_fix", {}).get("keep_intermediates", False)
+                )
+                if os.path.exists(merged_path) and merged_path != final_path and not keep_intermediates:
                     os.remove(merged_path)
         
         result_queue.put({

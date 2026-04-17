@@ -32,11 +32,20 @@ video:
     align_to_keyframes: true
     # How far back to scan for a keyframe near the requested start time.
     keyframe_scan_window_s: 15.0
+  join_fix:
+    # Normalize join inputs to a safe intermediate format before concat/xfade.
+    pre_normalize_clips: true
+    # Keep intermediate joined artifacts for debugging startup corruption issues.
+    keep_intermediates: false
+    safe_preset: "medium"
+    safe_crf: 18
+    safe_audio_rate: 48000
+    safe_channel_layout: "stereo"
   # Frame extraction mode:
   # - bulk: single ffmpeg run with fps+showinfo mapping (fast, mapped timestamps)
   # - precise: per-frame ffmpeg -ss extraction (slow, deterministic)
   frame_extraction_mode: "bulk"
-  
+
 # AI Detection settings
 detection:
   model_path: "models/yolov8n.pt"
