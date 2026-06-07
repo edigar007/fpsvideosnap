@@ -105,6 +105,62 @@ def test_color_tolerance_recalculates_hsv_range(client):
     if os.path.exists(config_path):
         os.remove(config_path)
 
+def test_config_image_test_success_with_color(client):
+    game_name = "test_config_image_color"
+    client.post('/api/game/create', json={"game_name": game_name})
+
+    rv = client.put(f'/api/config/{game_name}/roi', json={
+        "roi": [0, 0, 1, 1],
+    })
+    assert rv.status_code == 200
+
+    rv = client.post(f'/api/config/{game_name}/colors', json={
+        "name": "red",
+        "hsv": [0, 255, 255],
+        "hsv_lower": [0, 200, 200],
+        "hsv_upper": [10, 255, 255],
+        "tolerance": 20,
+    })
+    assert rv.status_code == 200
+
+    config_manager.update_config_section(game_name, "detection.confidence_threshold", 0.1)
+    config_manager.update_config_section(game_name, "detection.ocr.enabled", False)
+
+    img = Image.new('RGB', (10, 10), color=(255, 0, 0))
+    img_path = os.path.abspath(os.path.join("temp", "test_config_image_color.png"))
+    os.makedirs("temp", exist_ok=True)
+    img.save(img_path)
+
+    rv = client.post(f'/api/config/{game_name}/test-image', json={
+        "image_path": img_path,
+    })
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert data["status"] == "success"
+    assert data["is_kill"] is True
+    assert data["booleans"]["color"] is True
+    assert data["details"]["color"]["max_match_percent"] == 1.0
+
+    for path in [
+        img_path,
+        os.path.join(CONFIG_GAMES_DIR, f"{game_name}.yaml"),
+    ]:
+        if os.path.exists(path):
+            os.remove(path)
+
+
+def test_config_image_test_requires_image_path(client):
+    game_name = "test_config_image_missing_path"
+    client.post('/api/game/create', json={"game_name": game_name})
+
+    rv = client.post(f'/api/config/{game_name}/test-image', json={})
+    assert rv.status_code == 400
+    assert rv.get_json()["error"] == "image_path is required"
+
+    config_path = os.path.join(CONFIG_GAMES_DIR, f"{game_name}.yaml")
+    if os.path.exists(config_path):
+        os.remove(config_path)
+
 def test_save_template(client):
     img = Image.new('RGB', (10, 10), color='blue')
     img_path = os.path.abspath(os.path.join("temp", "test_template.png"))
@@ -166,6 +222,7 @@ def test_app_creates_without_ocr(monkeypatch):
     # Reset singleton state
     import src.tools.config_assistant.ocr_service as ocr_module
     ocr_module._ocr_service_instance = None
+    ocr_module.OCRService._instance = None
     
     # App should still create successfully
     app = create_app()
@@ -182,6 +239,7 @@ def test_ocr_detect_returns_503_when_unavailable(monkeypatch):
     # Reset singleton state BEFORE patching
     import src.tools.config_assistant.ocr_service as ocr_module
     ocr_module._ocr_service_instance = None
+    ocr_module.OCRService._instance = None
     
     # Mock OCRDetector to always raise an exception
     def mock_ocr_init(self, *args, **kwargs):
@@ -215,6 +273,7 @@ def test_ocr_detect_returns_503_when_unavailable(monkeypatch):
         os.unlink(temp_path)
         # Clean up singleton state for other tests
         ocr_module._ocr_service_instance = None
+        ocr_module.OCRService._instance = None
 
 
 # =============================================================================

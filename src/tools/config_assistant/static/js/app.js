@@ -17,6 +17,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusMessage = document.getElementById('status-message');
     const loadingOverlay = document.getElementById('loading-overlay');
     const downloadConfigBtn = document.getElementById('download-config-btn');
+    const testConfigBtn = document.getElementById('test-config-btn');
+    const testPanel = document.getElementById('config-test-panel');
+    const testResultSummary = document.getElementById('test-result-summary');
+    const testResultBadge = document.getElementById('test-result-badge');
+    const testResultDetails = document.getElementById('test-result-details');
 
     // App State
     const appState = {
@@ -86,6 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             appState.currentGame = gameId;
             appState.config = config;
+            resetTestResult('上传图片后点击测试配置');
             
             // Sync with other modules
             if (window.configPreview) {
@@ -217,6 +223,10 @@ document.addEventListener('DOMContentLoaded', () => {
             window.location.href = `/api/config/${appState.currentGame}/export`;
         });
 
+        if (testConfigBtn) {
+            testConfigBtn.addEventListener('click', () => testCurrentConfig());
+        }
+
         // Global Keyboard Shortcuts
         document.addEventListener('keydown', (e) => {
             // Avoid shortcuts when typing in inputs/textareas
@@ -281,6 +291,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Store absolute path for backend tools (OCR, Template)
             appState.currentImagePath = data.path;
+            resetTestResult('图片已加载，点击测试配置');
             
             // Preview locally
             const reader = new FileReader();
@@ -322,6 +333,149 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         }, 3000);
+    }
+
+    function resetTestResult(summary = '上传图片后点击测试配置') {
+        if (!testPanel) return;
+        testPanel.className = 'config-test-panel idle';
+        testResultBadge.textContent = '待测试';
+        testResultSummary.textContent = summary;
+        testResultDetails.innerHTML = '';
+    }
+
+    async function testCurrentConfig() {
+        if (!appState.currentGame) {
+            showStatus('请先选择游戏', 'error');
+            return;
+        }
+        if (!appState.currentImagePath) {
+            showStatus('请先上传图片', 'error');
+            resetTestResult('请先上传要测试的图片');
+            return;
+        }
+
+        showLoading('正在测试当前配置...');
+        setTestRunning();
+
+        try {
+            const response = await fetch(`/api/config/${appState.currentGame}/test-image`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_path: appState.currentImagePath })
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || '测试失败');
+            }
+
+            renderTestResult(data);
+            showStatus(data.is_kill ? '测试成功：配置命中' : '测试失败：未命中', data.is_kill ? 'success' : 'error');
+        } catch (err) {
+            console.error('Config test failed:', err);
+            renderTestError(err.message || '测试失败');
+            showStatus('配置测试失败', 'error');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    function setTestRunning() {
+        if (!testPanel) return;
+        testPanel.className = 'config-test-panel running';
+        testResultBadge.textContent = '测试中';
+        testResultSummary.textContent = '正在按当前配置检测图片...';
+        testResultDetails.innerHTML = '';
+    }
+
+    function renderTestError(message) {
+        if (!testPanel) return;
+        testPanel.className = 'config-test-panel failure';
+        testResultBadge.textContent = '失败';
+        testResultSummary.textContent = message;
+        testResultDetails.innerHTML = '';
+    }
+
+    function renderTestResult(data) {
+        if (!testPanel) return;
+
+        const passed = Boolean(data.is_kill);
+        testPanel.className = `config-test-panel ${passed ? 'success' : 'failure'}`;
+        testResultBadge.textContent = passed ? '成功' : '失败';
+        testResultSummary.textContent = passed
+            ? `检测命中，置信度 ${formatPct(data.confidence)}`
+            : `未达到命中条件，置信度 ${formatPct(data.confidence)}`;
+
+        const details = data.details || {};
+        const signals = data.signals || {};
+        const booleans = data.booleans || {};
+        const rules = details.rules || [];
+        const warnings = data.warnings || [];
+
+        const rows = [
+            ['模式', data.mode === 'rules' ? '规则判定' : '加权判定'],
+            ['预筛选', data.prefilter_passed ? '通过' : '未通过'],
+            ['颜色', `${booleans.color ? '命中' : '未命中'} (${formatPct(details.color?.max_match_percent || 0)} 像素)`],
+            ['模板', `${booleans.template ? '命中' : '未命中'} (${formatPct(signals.template || 0)})`],
+            ['OCR', formatOcrResult(details.ocr, booleans.ocr)],
+            ['YOLO', details.yolo?.available ? formatPct(signals.yolo || 0) : '未在助手测试中运行']
+        ];
+
+        let html = `
+            <div class="test-result-grid">
+                ${rows.map(([label, value]) => `
+                    <div class="test-result-row">
+                        <span>${escapeHtml(label)}</span>
+                        <strong>${escapeHtml(value)}</strong>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+
+        if (rules.length > 0) {
+            html += `
+                <div class="test-section-title">规则结果</div>
+                <div class="test-rule-list">
+                    ${rules.map(rule => `
+                        <div class="test-rule-item ${rule.matched ? 'matched' : 'missed'}">
+                            <span>${escapeHtml(rule.name)}</span>
+                            <strong>${rule.matched ? '命中' : `缺少: ${escapeHtml((rule.missing || []).join(', ') || '条件')}`}</strong>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        if (warnings.length > 0) {
+            html += `
+                <div class="test-warnings">
+                    ${warnings.map(warning => `<div><i class="fas fa-triangle-exclamation"></i> ${escapeHtml(warning)}</div>`).join('')}
+                </div>
+            `;
+        }
+
+        testResultDetails.innerHTML = html;
+    }
+
+    function formatOcrResult(ocr, matched) {
+        if (!ocr?.enabled) return '未启用';
+        if (!ocr.available) return '不可用';
+        if (matched) {
+            const text = ocr.match?.text || ocr.match?.matched_keyword || '关键词';
+            return `命中 ${text}`;
+        }
+        return `未命中 (${ocr.detections?.length || 0} 条文字)`;
+    }
+
+    function formatPct(value) {
+        const num = Number(value) || 0;
+        return `${(num * 100).toFixed(1)}%`;
+    }
+
+    function escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = String(value ?? '');
+        return div.innerHTML;
     }
     
     function setCurrentRule(ruleName) {

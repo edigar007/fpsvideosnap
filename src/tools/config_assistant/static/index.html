@@ -44,6 +44,9 @@
                 <button id="upload-btn" class="btn secondary">
                     <i class="fas fa-upload"></i> 上传参考图
                 </button>
+                <button id="test-config-btn" class="btn secondary">
+                    <i class="fas fa-vial"></i> 测试配置
+                </button>
                 <button id="download-config-btn" class="btn primary">
                     <i class="fas fa-save"></i> 导出配置
                 </button>
@@ -76,6 +79,17 @@
 
             <!-- Right Area: Tabs -->
             <aside class="config-tabs-panel">
+                <section id="config-test-panel" class="config-test-panel idle">
+                    <div class="test-result-main">
+                        <div>
+                            <div class="test-result-label">配置测试</div>
+                            <div id="test-result-summary" class="test-result-summary">上传图片后点击测试配置</div>
+                        </div>
+                        <div id="test-result-badge" class="test-result-badge">待测试</div>
+                    </div>
+                    <div id="test-result-details" class="test-result-details"></div>
+                </section>
+
                 <nav class="tabs-header">
                     <button class="tab-btn active" data-tab="roi">
                         <i class="fas fa-vector-square"></i> 区域
