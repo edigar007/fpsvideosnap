@@ -3,6 +3,14 @@ import yaml
 from typing import Any, Dict
 
 class ConfigLoader:
+    DETECTION_REPLACE_PATHS = {
+        "detection.ocr",
+        "detection.templates",
+        "detection.colors",
+        "detection.weights",
+        "detection.prefilter",
+    }
+
     def __init__(self, config_dir: str = "config"):
         self.config_dir = os.path.abspath(config_dir)
         self.default_config_path = os.path.join(self.config_dir, "default_config.yaml")
@@ -118,10 +126,15 @@ class ConfigLoader:
         with open(path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f) or {}
 
-    def _deep_merge(self, base: Dict[str, Any], update: Dict[str, Any]):
+    def _deep_merge(self, base: Dict[str, Any], update: Dict[str, Any], path: str = ""):
         for key, value in update.items():
+            current_path = f"{path}.{key}" if path else key
+            if current_path in self.DETECTION_REPLACE_PATHS:
+                base[key] = value
+                continue
+
             if isinstance(value, dict) and key in base and isinstance(base[key], dict):
-                self._deep_merge(base[key], value)
+                self._deep_merge(base[key], value, current_path)
             else:
                 base[key] = value
 

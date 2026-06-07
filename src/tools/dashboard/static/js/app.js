@@ -41,6 +41,8 @@ document.addEventListener('DOMContentLoaded', () => {
         detectionDetail: document.getElementById('detectionDetail'),
         killCount: document.getElementById('killCount'),
         clipCount: document.getElementById('clipCount'),
+        outputSection: document.getElementById('outputSection'),
+        outputList: document.getElementById('outputList'),
         // Error elements
         errorLog: document.getElementById('errorLog'),
         errorCount: document.getElementById('errorCount')
@@ -204,6 +206,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.progress) {
                 updateProgressDisplay(data.progress);
             }
+
+            if (data.result) {
+                updateResultDisplay(data.result);
+            } else if (data.status === 'running' || data.status === 'idle') {
+                clearOutputDisplay();
+            }
             
             // Fetch errors if running
             if (data.status === 'running') {
@@ -351,6 +359,7 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.detectionDetail.textContent = '';
         elements.killCount.textContent = '0';
         elements.clipCount.textContent = '0';
+        clearOutputDisplay();
     }
 
     function updateProgressDisplay(progress) {
@@ -391,6 +400,59 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update stats
         elements.killCount.textContent = progress.detected_kills || 0;
         elements.clipCount.textContent = progress.extracted_clips || 0;
+    }
+
+    function updateResultDisplay(result) {
+        const outputFiles = Array.isArray(result.output_files) ? result.output_files : [];
+        if (outputFiles.length === 0) {
+            clearOutputDisplay();
+            return;
+        }
+
+        elements.outputSection.classList.remove('hidden');
+        elements.outputList.innerHTML = '';
+
+        outputFiles.forEach(file => {
+            const item = document.createElement('div');
+            item.className = `output-item ${file.exists === false ? 'missing' : ''}`;
+
+            const info = document.createElement('div');
+            info.className = 'output-info';
+
+            const title = document.createElement('div');
+            title.className = 'output-name';
+            title.textContent = file.label || file.name || '生成文件';
+
+            const path = document.createElement('div');
+            path.className = 'output-path';
+            path.textContent = file.path || '';
+            path.title = file.path || '';
+
+            info.appendChild(title);
+            info.appendChild(path);
+
+            const actions = document.createElement('div');
+            actions.className = 'output-actions';
+
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'btn btn-secondary btn-xs';
+            copyBtn.textContent = '复制路径';
+            copyBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                copyOutputPath(file.path || '');
+            });
+
+            actions.appendChild(copyBtn);
+            item.appendChild(info);
+            item.appendChild(actions);
+            elements.outputList.appendChild(item);
+        });
+    }
+
+    function clearOutputDisplay() {
+        if (!elements.outputSection || !elements.outputList) return;
+        elements.outputSection.classList.add('hidden');
+        elements.outputList.innerHTML = '';
     }
 
     function addErrorEntry(error) {
@@ -439,6 +501,18 @@ document.addEventListener('DOMContentLoaded', () => {
             toast.style.transform = 'translateX(100%)';
             setTimeout(() => toast.remove(), 300);
         }, 3000);
+    }
+
+    async function copyOutputPath(path) {
+        if (!path) return;
+
+        try {
+            await navigator.clipboard.writeText(path);
+            showToast('已复制生成文件路径', 'success');
+        } catch (error) {
+            console.warn('Clipboard copy failed:', error);
+            showToast(path, 'info');
+        }
     }
 
     function escapeHtml(text) {

@@ -60,6 +60,29 @@ class TaskInfo:
     progress: ProgressInfo = field(default_factory=ProgressInfo)
 
 
+def _make_output_file(path: Optional[str], label: str, file_type: str) -> Optional[Dict[str, Any]]:
+    """Build output file metadata for dashboard display."""
+    if not path:
+        return None
+
+    abs_path = os.path.abspath(path)
+    item = {
+        "path": abs_path,
+        "name": os.path.basename(abs_path),
+        "label": label,
+        "type": file_type,
+        "exists": os.path.exists(abs_path),
+    }
+
+    if item["exists"]:
+        try:
+            item["size"] = os.path.getsize(abs_path)
+        except OSError:
+            pass
+
+    return item
+
+
 def _run_processing_task(
     videos: List[str],
     game: str,
@@ -158,6 +181,7 @@ def _run_processing_task(
         
         # Process each video
         all_clips = []
+        output_files = []
         
         for video_idx, video_path in enumerate(videos):
             if cancel_event.is_set():
@@ -256,6 +280,13 @@ def _run_processing_task(
                     clips = pipeline.results.get("clips", [])
                 
                 all_clips.extend(clips)
+                final_video = pipeline.results.get("final_video")
+                report_path = pipeline.results.get("report_path")
+                output_video = _make_output_file(final_video, f"{video_name} 高光视频", "video")
+                output_report = _make_output_file(report_path, f"{video_name} 报告", "report")
+                for output_file in [output_video, output_report]:
+                    if output_file:
+                        output_files.append(output_file)
                 
                 # Final progress update for this video
                 send_progress({
@@ -315,11 +346,16 @@ def _run_processing_task(
                 )
                 if os.path.exists(merged_path) and merged_path != final_path and not keep_intermediates:
                     os.remove(merged_path)
+
+                output_file = _make_output_file(final_path, "合并高光视频", "video")
+                if output_file:
+                    output_files.append(output_file)
         
         result_queue.put({
             "success": True,
             "total_clips": len(all_clips),
             "videos_processed": len(videos),
+            "output_files": output_files,
             "message": "Processing completed successfully"
         })
         

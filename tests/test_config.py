@@ -2,6 +2,8 @@ import os
 import sys
 import unittest
 import yaml
+import tempfile
+import shutil
 
 # Add src to python path
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -30,6 +32,138 @@ class TestConfigLoader(unittest.TestCase):
         self.assertEqual(config['global']['device'], 'cuda')
         # Check game-specific override
         self.assertEqual(config['highlights']['pre_kill_time'], 5.0)
+
+    def test_game_detection_sections_replace_default_detection_sections(self):
+        if not os.path.exists(os.path.join(self.config_dir, "games", "battlefield_1.yaml")):
+            self.skipTest("battlefield_1.yaml is not present")
+
+        config = self.loader.load_config(game_name="battlefield_1")
+        detection = config["detection"]
+
+        templates = detection["templates"]
+        self.assertIn("killicon", templates)
+        self.assertNotIn("skull_icon", templates)
+        self.assertNotIn("kill_icon", templates)
+
+        self.assertEqual(detection["ocr"], {
+            "enabled": False,
+            "keywords": [],
+            "similarity_threshold": 0.8,
+            "required": False,
+        })
+        self.assertEqual(list(detection["colors"].keys()), ["red_name"])
+        self.assertEqual(detection["weights"], {
+            "ocr": 0.0,
+            "template": 0.9,
+            "color": 0.0,
+            "yolo": 0.0,
+        })
+        self.assertEqual(detection["prefilter"], {
+            "enabled": True,
+            "color_threshold": 0.01,
+        })
+        self.assertEqual(detection["killfeed_roi"], [
+            0.4293561490006595,
+            0.5554773873888226,
+            0.15080691183907463,
+            0.1806974675198949,
+        ])
+
+        # Other nested defaults should still be preserved by deep merge.
+        self.assertEqual(config["global"]["device"], "cuda")
+        self.assertEqual(config["video"]["ffmpeg_path"], "ffmpeg")
+
+    def test_detection_sections_replace_defaults_with_temp_config(self):
+        temp_dir = tempfile.mkdtemp()
+        try:
+            games_dir = os.path.join(temp_dir, "games")
+            os.makedirs(games_dir, exist_ok=True)
+
+            with open(os.path.join(temp_dir, "default_config.yaml"), "w", encoding="utf-8") as f:
+                yaml.dump({
+                    "global": {"device": "cuda"},
+                    "video": {"ffmpeg_path": "ffmpeg"},
+                    "detection": {
+                        "ocr": {
+                            "enabled": True,
+                            "keywords": ["DEFAULT"],
+                            "similarity_threshold": 0.8,
+                            "lang": "ch",
+                            "use_gpu": True,
+                        },
+                        "templates": {
+                            "skull_icon": {"path": "skull.png", "threshold": 0.7},
+                            "kill_icon": {"path": "kill.png", "threshold": 0.7},
+                        },
+                        "colors": {
+                            "default_red": {
+                                "hsv_lower": [0, 0, 0],
+                                "hsv_upper": [10, 255, 255],
+                            },
+                        },
+                        "weights": {
+                            "ocr": 0.4,
+                            "template": 0.3,
+                            "color": 0.2,
+                            "yolo": 0.1,
+                        },
+                        "prefilter": {
+                            "enabled": False,
+                            "color_threshold": 0.02,
+                        },
+                        "killfeed_roi": [0, 0, 1, 1],
+                    },
+                }, f)
+
+            with open(os.path.join(games_dir, "test_game.yaml"), "w", encoding="utf-8") as f:
+                yaml.dump({
+                    "detection": {
+                        "ocr": {
+                            "enabled": False,
+                            "keywords": [],
+                            "similarity_threshold": 0.9,
+                        },
+                        "templates": {
+                            "game_icon": {
+                                "path": "models/templates/test_game/game_icon.png",
+                                "threshold": 0.8,
+                            },
+                        },
+                        "colors": {
+                            "game_blue": {
+                                "hsv_lower": [100, 100, 100],
+                                "hsv_upper": [120, 255, 255],
+                            },
+                        },
+                        "weights": {
+                            "ocr": 0.0,
+                            "template": 1.0,
+                        },
+                        "prefilter": {
+                            "enabled": True,
+                            "color_threshold": 0.01,
+                        },
+                        "killfeed_roi": [0.1, 0.2, 0.3, 0.4],
+                    },
+                }, f)
+
+            config = ConfigLoader(config_dir=temp_dir).load_config(game_name="test_game")
+            detection = config["detection"]
+
+            self.assertEqual(detection["ocr"], {
+                "enabled": False,
+                "keywords": [],
+                "similarity_threshold": 0.9,
+            })
+            self.assertEqual(list(detection["templates"].keys()), ["game_icon"])
+            self.assertEqual(list(detection["colors"].keys()), ["game_blue"])
+            self.assertEqual(detection["weights"], {"ocr": 0.0, "template": 1.0})
+            self.assertEqual(detection["prefilter"], {"enabled": True, "color_threshold": 0.01})
+            self.assertEqual(detection["killfeed_roi"], [0.1, 0.2, 0.3, 0.4])
+            self.assertEqual(config["global"]["device"], "cuda")
+            self.assertEqual(config["video"]["ffmpeg_path"], "ffmpeg")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_invalid_game(self):
         with self.assertRaises(FileNotFoundError):
