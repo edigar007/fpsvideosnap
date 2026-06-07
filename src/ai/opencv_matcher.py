@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import os
+from typing import Dict, Optional
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -16,7 +17,47 @@ class OpenCVMatcher:
         self.config = config or {}
         self.templates = {}
         self.templates_gray = {}
-        
+
+    def load_template_file(self, name: str, template_path: str) -> bool:
+        """
+        Load one template image with an explicit config name.
+        Returns True when the image was loaded and cached.
+        """
+        if not template_path or not os.path.exists(template_path):
+            logger.warning(f"Template file {template_path} does not exist.")
+            return False
+
+        template = cv2.imread(template_path, cv2.IMREAD_UNCHANGED)
+        if template is None:
+            logger.warning(f"Failed to load template image: {template_path}")
+            return False
+
+        self._cache_template(name, template)
+        logger.debug(f"Loaded template: {name} from {template_path}")
+        return True
+
+    def load_templates_from_config(self, detection_config: Optional[Dict], project_root: str = None) -> int:
+        """
+        Load templates from detection.template_dir and detection.templates.*.path.
+        Relative paths are resolved from project_root or the current working directory.
+        """
+        detection_config = detection_config or {}
+        before_count = len(self.templates)
+
+        template_dir = detection_config.get("template_dir", "")
+        if template_dir:
+            self.load_templates(self._resolve_path(template_dir, project_root))
+
+        for templates_cfg in self._iter_template_configs(detection_config):
+            for name, cfg in templates_cfg.items():
+                if not isinstance(cfg, dict):
+                    continue
+                template_path = cfg.get("path")
+                if template_path:
+                    self.load_template_file(name, self._resolve_path(template_path, project_root))
+
+        return len(self.templates) - before_count
+
     def load_templates(self, template_dir: str):
         """
         Loads all .png or .jpg templates from a directory.
@@ -29,23 +70,39 @@ class OpenCVMatcher:
         for filename in os.listdir(template_dir):
             if filename.endswith(('.png', '.jpg', '.jpeg')):
                 path = os.path.join(template_dir, filename)
-                template = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-                if template is not None:
-                    name = os.path.splitext(filename)[0]
-                    
-                    # Store original for compatibility
-                    self.templates[name] = template
-                    
-                    # Pre-convert to gray for performance
-                    if len(template.shape) == 3 and template.shape[2] == 4:
-                        gray = cv2.cvtColor(template, cv2.COLOR_BGRA2GRAY)
-                    elif len(template.shape) == 3:
-                        gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-                    else:
-                        gray = template
-                    self.templates_gray[name] = gray
-                    
-                    logger.debug(f"Loaded template: {name}")
+                name = os.path.splitext(filename)[0]
+                self.load_template_file(name, path)
+
+    def _cache_template(self, name: str, template: np.ndarray) -> None:
+        """Cache original and grayscale template arrays."""
+        self.templates[name] = template
+
+        if len(template.shape) == 3 and template.shape[2] == 4:
+            gray = cv2.cvtColor(template, cv2.COLOR_BGRA2GRAY)
+        elif len(template.shape) == 3:
+            gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = template
+        self.templates_gray[name] = gray
+
+    def _resolve_path(self, path: str, project_root: str = None) -> str:
+        """Resolve relative template paths from project root/current working directory."""
+        if os.path.isabs(path):
+            return path
+        base_dir = project_root or os.getcwd()
+        return os.path.abspath(os.path.join(base_dir, path))
+
+    def _iter_template_configs(self, detection_config: Dict):
+        """Yield global and per-rule template config dictionaries."""
+        templates = detection_config.get("templates", {})
+        if isinstance(templates, dict):
+            yield templates
+
+        for rule in detection_config.get("rules", []) or []:
+            overrides = rule.get("detection_overrides", {})
+            templates = overrides.get("templates", {})
+            if isinstance(templates, dict):
+                yield templates
 
     def _get_search_area(self, frame: np.ndarray, roi=None):
         """Helper to crop and grayscale search area."""

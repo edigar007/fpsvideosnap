@@ -91,4 +91,10 @@ def parse_args():
         parser.print_help()
         sys.exit(0)
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if getattr(args, "command", None) == "run":
+        videos = args.video if isinstance(args.video, list) else [args.video]
+        args.videos = videos
+        if len(videos) == 1:
+            args.video = videos[0]
+    return args

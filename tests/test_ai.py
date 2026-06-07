@@ -159,6 +159,62 @@ def test_opencv_template_loading_missing_dir():
     matcher.load_templates("/nonexistent/path")
     assert len(matcher.templates) == 0
 
+def test_opencv_template_loading_from_config_paths(tmp_path):
+    """Config-assistant templates should load from detection.templates.*.path."""
+    template_dir = tmp_path / "models" / "templates" / "test_game"
+    template_dir.mkdir(parents=True)
+    template = np.ones((12, 16, 3), dtype=np.uint8) * 180
+    cv2.imwrite(str(template_dir / "kill_icon.png"), template)
+
+    detection_config = {
+        "templates": {
+            "kill_icon": {
+                "path": "models/templates/test_game/kill_icon.png",
+                "threshold": 0.8,
+            }
+        }
+    }
+
+    matcher = OpenCVMatcher()
+    loaded_count = matcher.load_templates_from_config(
+        detection_config,
+        project_root=str(tmp_path),
+    )
+
+    assert loaded_count == 1
+    assert "kill_icon" in matcher.templates
+    assert matcher.templates["kill_icon"].shape == (12, 16, 3)
+
+def test_opencv_template_loading_from_rule_override_paths(tmp_path):
+    """Rule-level template paths should be loaded for formal detection."""
+    template_path = tmp_path / "rule_icon.png"
+    template = np.ones((10, 10, 3), dtype=np.uint8) * 90
+    cv2.imwrite(str(template_path), template)
+
+    detection_config = {
+        "rules": [
+            {
+                "name": "template_rule",
+                "enabled": True,
+                "require": ["template"],
+                "detection_overrides": {
+                    "templates": {
+                        "rule_icon": {
+                            "path": str(template_path),
+                            "threshold": 0.8,
+                        }
+                    }
+                },
+            }
+        ]
+    }
+
+    matcher = OpenCVMatcher()
+    loaded_count = matcher.load_templates_from_config(detection_config)
+
+    assert loaded_count == 1
+    assert "rule_icon" in matcher.templates
+
 def test_opencv_match_all_templates(tmp_path):
     """TASK-006: Verify match_all_templates method works correctly."""
     # Create a test frame with a distinct pattern
@@ -235,6 +291,31 @@ def test_detection_weights_with_templates(tmp_path, mock_yolo_model):
     # Both should detect kill, but with different confidence scores
     assert result_no_templates["is_kill"] is True
     assert result_with_templates["is_kill"] is True
+
+def test_kill_detector_uses_explicit_color_bounds_without_double_tolerance(mock_yolo_model):
+    game_config = {
+        'detection': {
+            'killfeed_roi': [0, 0, 1, 1],
+            'colors': {
+                'sample_red': {
+                    'hsv_lower': [0, 235, 235],
+                    'hsv_upper': [10, 255, 255],
+                    'tolerance': 20,
+                }
+            }
+        }
+    }
+    yolo = YoloDetector(mock_yolo_model)
+    cv_matcher = MagicMock()
+    cv_matcher.templates = {}
+    cv_matcher.detect_color.return_value = 0.0
+
+    detector = KillDetector(yolo, cv_matcher, game_config)
+    detector._prefilter_with_result(np.zeros((10, 10, 3), dtype=np.uint8))
+
+    _, lower, upper = cv_matcher.detect_color.call_args.args[:3]
+    assert lower == [0, 235, 235]
+    assert upper == [10, 255, 255]
 
 def test_timestamp_recorder_multiple_saves(tmp_path):
     """TASK-006: Verify TimestampRecorder handles multiple save operations correctly."""

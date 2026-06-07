@@ -105,9 +105,14 @@ def test_pipeline_full_flow(
     # Create the temp directory for checkpointing
     if not os.path.exists("temp"):
         os.makedirs("temp")
+
+    def mock_exists(path):
+        if str(path).startswith("test_output"):
+            return False
+        return True
     
     with patch("os.path.abspath", side_effect=lambda x: x):
-        with patch("os.path.exists", return_value=True):
+        with patch("os.path.exists", side_effect=mock_exists):
             with patch("os.makedirs"):  # Mock directory creation for history
                 success = pipeline.run("dummy_video.mp4")
     
@@ -135,6 +140,25 @@ def test_pipeline_full_flow(
         assert isinstance(clip["start_ms"], int), "start_ms should be integer"
         assert isinstance(clip["end_ms"], int), "end_ms should be integer"
 
+def test_pipeline_loads_templates_from_detection_config(mock_config):
+    mock_config["detection"]["templates"] = {
+        "kill_icon": {
+            "path": "models/templates/test_game/kill_icon.png",
+            "threshold": 0.8,
+        }
+    }
+    pipeline = Pipeline(mock_config)
+    matcher = MagicMock()
+    matcher.templates = {"kill_icon": object()}
+    matcher.load_templates_from_config.return_value = 1
+
+    loaded_count = pipeline._load_detection_templates(matcher)
+
+    assert loaded_count == 1
+    matcher.load_templates_from_config.assert_called_once()
+    detection_cfg = matcher.load_templates_from_config.call_args.args[0]
+    assert detection_cfg["templates"]["kill_icon"]["path"] == "models/templates/test_game/kill_icon.png"
+
 def test_pipeline_no_kills(mock_config):
     with patch("src.pipeline.pipeline.VideoInfo") as mock_video_info, \
          patch("src.pipeline.pipeline.FrameExtractor") as mock_frame_ext, \
@@ -154,9 +178,14 @@ def test_pipeline_no_kills(mock_config):
         
         pipeline = Pipeline(mock_config)
         pipeline._save_checkpoint = MagicMock()
+
+        def mock_exists(path):
+            if str(path).startswith("test_output"):
+                return False
+            return True
         
         with patch("os.path.abspath", side_effect=lambda x: x), \
-             patch("os.path.exists", return_value=True), \
+             patch("os.path.exists", side_effect=mock_exists), \
              patch("os.makedirs"):  # Mock directory creation for history
             success = pipeline.run("dummy_video.mp4")
             

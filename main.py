@@ -82,7 +82,7 @@ def main():
     
     try:
         processor = BatchProcessor(config)
-        results = processor.process(args.video)  # args.video is now a list
+        results = processor.process(args.videos)
         
         # Final Summary
         if not results:

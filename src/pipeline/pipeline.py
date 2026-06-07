@@ -81,6 +81,17 @@ class Pipeline:
         self.temp_dir = temp_manager.create_temp_dir("pipeline_")
         self.video_info: Optional[VideoInfo] = None
         self.model_manager = ModelManager(config.get("ai", {}).get("model_dir", "models"))
+
+    def _load_detection_templates(self, opencv_matcher: OpenCVMatcher) -> int:
+        """
+        Load templates from all supported detection config locations.
+        Supports both detection.template_dir and detection.templates.*.path.
+        """
+        detection_cfg = self.config.get("detection", {})
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        loaded_count = opencv_matcher.load_templates_from_config(detection_cfg, project_root=project_root)
+        logger.info(f"Loaded {len(opencv_matcher.templates)} templates for detection ({loaded_count} new)")
+        return loaded_count
         
     def _update_stage(self, name: str, status: StageStatus, error: str = None):
         stage = self.stages[name]
@@ -301,10 +312,7 @@ class Pipeline:
                 opencv_matcher = OpenCVMatcher(self.config)
                 
                 # TASK-005: Load templates before batch processing
-                template_dir = self.config.get("detection", {}).get("template_dir", "")
-                if template_dir and os.path.exists(template_dir):
-                    opencv_matcher.load_templates(template_dir)
-                    logger.info(f"Loaded {len(opencv_matcher.templates)} templates from {template_dir}")
+                self._load_detection_templates(opencv_matcher)
                 
                 kill_detector = KillDetector(yolo_detector, opencv_matcher, self.config)
                 profiler.end('stage_detection_setup')
@@ -595,7 +603,10 @@ class Pipeline:
                 if not keep_intermediates:
                     temp_manager.clean_all()
                 if os.path.exists(self.checkpoint_file):
-                    os.remove(self.checkpoint_file)
+                    try:
+                        os.remove(self.checkpoint_file)
+                    except FileNotFoundError:
+                        pass
                 self._update_stage("cleanup", StageStatus.SUCCESS)
 
             # 10. 打印性能分析报告
@@ -605,7 +616,11 @@ class Pipeline:
             history_dir = self.config.get("global", {}).get("history_dir", "history")
             run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             perf_file = os.path.join(history_dir, f"performance_{run_timestamp}.json")
-            profiler.save_to_file(perf_file)
+            try:
+                os.makedirs(history_dir, exist_ok=True)
+                profiler.save_to_file(perf_file)
+            except OSError as e:
+                logger.warning(f"Failed to save performance profile: {e}")
 
             logger.info(f"[bold green]Pipeline completed successfully for {video_path}[/bold green]")
             return True
@@ -680,9 +695,7 @@ class Pipeline:
             yolo_detector = YoloDetector(yolo_model, batch_size=batch_size)
             opencv_matcher = OpenCVMatcher(self.config)
             
-            template_dir = self.config.get("detection", {}).get("template_dir", "")
-            if template_dir and os.path.exists(template_dir):
-                opencv_matcher.load_templates(template_dir)
+            self._load_detection_templates(opencv_matcher)
             
             kill_detector = KillDetector(yolo_detector, opencv_matcher, self.config)
             profiler.end('stage_detection_setup')

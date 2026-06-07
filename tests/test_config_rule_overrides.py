@@ -74,10 +74,17 @@ def test_update_rule_override_success(config_manager):
     config = config_manager.get_config("test_game")
     assert config["detection"]["rules"][0]["detection_overrides"]["ocr"]["keywords"] == keywords
 
-def test_update_rule_override_rule_not_found(config_manager):
+def test_update_rule_override_auto_creates_rule(config_manager):
     config_manager.create_game("test_game")
     success = config_manager.update_rule_override("test_game", "nonexistent", "killfeed_roi", [0, 0, 0, 0])
-    assert success is False
+    assert success is True
+
+    config = config_manager.get_config("test_game")
+    rule = next((r for r in config["detection"]["rules"] if r["name"] == "nonexistent"), None)
+    assert rule is not None
+    assert rule["enabled"] is True
+    assert rule["require"] == ["color"]
+    assert rule["detection_overrides"]["killfeed_roi"] == [0, 0, 0, 0]
 
 def test_api_roi_override(client, config_manager):
     config_manager.create_game("test_game")

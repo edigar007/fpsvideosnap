@@ -67,10 +67,10 @@ def test_pick_color(client):
     
     data = {
         "image_path": img_path,
-        "x": 5,
-        "y": 5
+        "x": 0.5,
+        "y": 0.5
     }
-    rv = client.post('/api/pick-color', json=data)
+    rv = client.post('/api/color/pick', json=data)
     assert rv.status_code == 200
     res = rv.get_json()
     assert res['rgb'] == [255, 0, 0]
@@ -78,6 +78,32 @@ def test_pick_color(client):
     assert res['hsv'][1] == 255
     assert res['hsv'][2] == 255
     assert 'hsv_range' in res
+
+def test_color_tolerance_recalculates_hsv_range(client):
+    game_name = "test_color_tolerance"
+    client.post('/api/game/create', json={"game_name": game_name})
+
+    rv = client.post(f'/api/config/{game_name}/colors', json={
+        "name": "sample_red",
+        "hsv": [0, 255, 255],
+        "hsv_lower": [0, 215, 215],
+        "hsv_upper": [20, 255, 255],
+        "tolerance": 20,
+    })
+    assert rv.status_code == 200
+
+    rv = client.patch(f'/api/config/{game_name}/colors/sample_red/tolerance', json={
+        "tolerance": 10,
+    })
+    assert rv.status_code == 200
+    color = rv.get_json()["config"]["detection"]["colors"]["sample_red"]
+    assert color["hsv_lower"] == [0, 235, 235]
+    assert color["hsv_upper"] == [10, 255, 255]
+    assert color["tolerance"] == 10
+
+    config_path = os.path.join(CONFIG_GAMES_DIR, f"{game_name}.yaml")
+    if os.path.exists(config_path):
+        os.remove(config_path)
 
 def test_save_template(client):
     img = Image.new('RGB', (10, 10), color='blue')

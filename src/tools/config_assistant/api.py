@@ -2,6 +2,7 @@ import os
 import shutil
 import cv2
 import numpy as np
+import yaml
 from flask import Blueprint, request, jsonify, current_app, send_from_directory
 from PIL import Image
 from src.tools.config_assistant.utils import rgb_to_hsv, calculate_hsv_range, validate_identifier
@@ -51,6 +52,10 @@ def upload_file():
 def list_games():
     games = config_manager.list_games()
     return jsonify({"games": games})
+
+@api_bp.route("/games", methods=["GET"])
+def list_games_legacy():
+    return jsonify(config_manager.list_games())
 
 @api_bp.route("/game/create", methods=["POST"])
 def create_game():
@@ -188,6 +193,7 @@ def update_templates_config(game):
 def update_template_threshold(game, name):
     data = request.json
     threshold = data.get("threshold")
+    rule_name = data.get("rule_name")
     
     if threshold is None:
         return jsonify({"error": "threshold is required"}), 400
@@ -196,30 +202,51 @@ def update_template_threshold(game, name):
     if not config:
         return jsonify({"error": f"Config for {game} not found"}), 404
     
-    templates = config.get("detection", {}).get("templates", {})
+    if rule_name:
+        rules = config.get("detection", {}).get("rules", [])
+        target_rule = next((r for r in rules if r.get("name") == rule_name), None)
+        templates = target_rule.get("detection_overrides", {}).get("templates", {}) if target_rule else {}
+    else:
+        templates = config.get("detection", {}).get("templates", {})
     if name not in templates:
         return jsonify({"error": f"Template '{name}' not found"}), 404
     
     templates[name]["threshold"] = threshold
     
-    if config_manager.update_config_section(game, "detection.templates", templates):
+    if rule_name:
+        success = config_manager.update_rule_override(game, rule_name, "templates", templates)
+    else:
+        success = config_manager.update_config_section(game, "detection.templates", templates)
+
+    if success:
         config = config_manager.get_config(game)
         return jsonify({"message": f"Template '{name}' threshold updated", "config": config})
     return jsonify({"error": "Failed to update threshold"}), 500
 
 @api_bp.route("/config/<game>/templates/<name>", methods=["DELETE"])
 def delete_template_from_config(game, name):
+    rule_name = request.args.get("rule_name")
     config = config_manager.get_config(game)
     if not config:
         return jsonify({"error": f"Config for {game} not found"}), 404
     
-    templates = config.get("detection", {}).get("templates", {})
+    if rule_name:
+        rules = config.get("detection", {}).get("rules", [])
+        target_rule = next((r for r in rules if r.get("name") == rule_name), None)
+        templates = target_rule.get("detection_overrides", {}).get("templates", {}) if target_rule else {}
+    else:
+        templates = config.get("detection", {}).get("templates", {})
     if name not in templates:
         return jsonify({"error": f"Template '{name}' not found"}), 404
     
     del templates[name]
     
-    if config_manager.update_config_section(game, "detection.templates", templates):
+    if rule_name:
+        success = config_manager.update_rule_override(game, rule_name, "templates", templates)
+    else:
+        success = config_manager.update_config_section(game, "detection.templates", templates)
+
+    if success:
         config = config_manager.get_config(game)
         return jsonify({"message": f"Template '{name}' deleted from config", "config": config})
     return jsonify({"error": "Failed to delete template"}), 500
@@ -232,6 +259,7 @@ def update_colors(game):
     # POST: Add a single color
     if request.method == "POST":
         name = data.get("name")
+        hsv = data.get("hsv")
         hsv_lower = data.get("hsv_lower")
         hsv_upper = data.get("hsv_upper")
         tolerance = data.get("tolerance", 20)
@@ -255,10 +283,13 @@ def update_colors(game):
             colors = config.get("detection", {}).get("colors", {})
             
         colors[name] = {
+            "hsv": hsv,
             "hsv_lower": hsv_lower,
             "hsv_upper": hsv_upper,
             "tolerance": tolerance
         }
+        if hsv is None:
+            colors[name].pop("hsv")
         
         if rule_name:
             success = config_manager.update_rule_override(game, rule_name, "colors", colors)
@@ -290,6 +321,7 @@ def update_colors(game):
 def update_color_tolerance(game, name):
     data = request.json
     tolerance = data.get("tolerance")
+    rule_name = data.get("rule_name")
     
     if tolerance is None:
         return jsonify({"error": "tolerance is required"}), 400
@@ -298,34 +330,68 @@ def update_color_tolerance(game, name):
     if not config:
         return jsonify({"error": f"Config for {game} not found"}), 404
     
-    colors = config.get("detection", {}).get("colors", {})
+    if rule_name:
+        rules = config.get("detection", {}).get("rules", [])
+        target_rule = next((r for r in rules if r.get("name") == rule_name), None)
+        colors = target_rule.get("detection_overrides", {}).get("colors", {}) if target_rule else {}
+    else:
+        colors = config.get("detection", {}).get("colors", {})
     if name not in colors:
         return jsonify({"error": f"Color '{name}' not found"}), 404
     
-    # Recalculate hsv_lower and hsv_upper based on new tolerance
     color = colors[name]
-    # Assuming we have the original HSV value stored, or we use the midpoint
-    # For simplicity, let's just update the tolerance value
     color["tolerance"] = tolerance
+    hsv = color.get("hsv")
+    if hsv is None:
+        hsv_lower = color.get("hsv_lower")
+        hsv_upper = color.get("hsv_upper")
+        if hsv_lower and hsv_upper:
+            hsv = [
+                int((hsv_lower[0] + hsv_upper[0]) / 2),
+                int((hsv_lower[1] + hsv_upper[1]) / 2),
+                int((hsv_lower[2] + hsv_upper[2]) / 2),
+            ]
+            color["hsv"] = hsv
+
+    if hsv:
+        lower, upper = calculate_hsv_range(hsv[0], hsv[1], hsv[2], (tolerance, tolerance * 2, tolerance * 2))
+        color["hsv_lower"] = lower
+        color["hsv_upper"] = upper
     
-    if config_manager.update_config_section(game, "detection.colors", colors):
+    if rule_name:
+        success = config_manager.update_rule_override(game, rule_name, "colors", colors)
+    else:
+        success = config_manager.update_config_section(game, "detection.colors", colors)
+
+    if success:
         config = config_manager.get_config(game)
         return jsonify({"message": f"Color '{name}' tolerance updated", "config": config})
     return jsonify({"error": "Failed to update tolerance"}), 500
 
 @api_bp.route("/config/<game>/colors/<name>", methods=["DELETE"])
 def delete_color_from_config(game, name):
+    rule_name = request.args.get("rule_name")
     config = config_manager.get_config(game)
     if not config:
         return jsonify({"error": f"Config for {game} not found"}), 404
     
-    colors = config.get("detection", {}).get("colors", {})
+    if rule_name:
+        rules = config.get("detection", {}).get("rules", [])
+        target_rule = next((r for r in rules if r.get("name") == rule_name), None)
+        colors = target_rule.get("detection_overrides", {}).get("colors", {}) if target_rule else {}
+    else:
+        colors = config.get("detection", {}).get("colors", {})
     if name not in colors:
         return jsonify({"error": f"Color '{name}' not found"}), 404
     
     del colors[name]
     
-    if config_manager.update_config_section(game, "detection.colors", colors):
+    if rule_name:
+        success = config_manager.update_rule_override(game, rule_name, "colors", colors)
+    else:
+        success = config_manager.update_config_section(game, "detection.colors", colors)
+
+    if success:
         config = config_manager.get_config(game)
         return jsonify({"message": f"Color '{name}' deleted from config", "config": config})
     return jsonify({"error": "Failed to delete color"}), 500
@@ -336,6 +402,98 @@ def export_config(game):
     if yaml_str:
         return jsonify({"yaml": yaml_str})
     return jsonify({"error": f"Failed to export config for {game}"}), 404
+
+
+# --- Legacy v1 Compatibility API ---
+
+@api_bp.route("/load-config/<game>", methods=["GET"])
+def load_config_legacy(game):
+    config = config_manager.get_config(game)
+    if config is None:
+        return jsonify({"error": f"Config for {game} not found"}), 404
+    return jsonify(config)
+
+
+@api_bp.route("/generate-config", methods=["POST"])
+def generate_config_legacy():
+    data = request.json or {}
+    game_name = data.get("game_name")
+    try:
+        game_name = validate_identifier(game_name, "game_name")
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    rois = data.get("rois", [])
+    colors = data.get("colors", [])
+
+    killfeed_roi = [0, 0, 1, 1]
+    for roi in rois:
+        if roi.get("name") == "killfeed":
+            killfeed_roi = [roi.get("x", 0), roi.get("y", 0), roi.get("w", 1), roi.get("h", 1)]
+            break
+
+    color_config = {}
+    for color in colors:
+        name = color.get("name")
+        if not name:
+            continue
+        color_config[name] = {
+            "hsv_lower": color.get("hsv_lower", color.get("lower")),
+            "hsv_upper": color.get("hsv_upper", color.get("upper")),
+            "tolerance": color.get("tolerance", 0),
+        }
+
+    config = {
+        "game_name": game_name,
+        "detection": {
+            "killfeed_roi": killfeed_roi,
+            "template_dir": f"models/templates/{game_name}",
+            "templates": {},
+            "colors": color_config,
+        },
+    }
+    return jsonify({"yaml": yaml.dump(config, allow_unicode=True, sort_keys=False)})
+
+
+@api_bp.route("/save-template", methods=["POST"])
+def save_template_legacy():
+    data = request.json or {}
+    image_path = data.get("image_path")
+    game = data.get("game_name")
+    name = data.get("template_name")
+    roi = data.get("roi")
+
+    if not all([image_path, game, name]):
+        return jsonify({"error": "image_path, game_name and template_name are required"}), 400
+
+    try:
+        game = validate_identifier(game, "game_name")
+        name = validate_identifier(name, "template_name")
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    if not os.path.exists(image_path):
+        return jsonify({"error": "Image not found"}), 404
+
+    target_dir = os.path.join(PROJECT_ROOT, "models", "templates", game)
+    os.makedirs(target_dir, exist_ok=True)
+    target_path = os.path.join(target_dir, f"{name}.png")
+
+    try:
+        with Image.open(image_path) as img:
+            if roi:
+                left = int(roi.get("x", 0))
+                top = int(roi.get("y", 0))
+                right = left + int(roi.get("w", img.width))
+                bottom = top + int(roi.get("h", img.height))
+                img = img.crop((left, top, right, bottom))
+            img.save(target_path)
+
+        rel_path = f"models/templates/{game}/{name}.png"
+        return jsonify({"message": "Template saved successfully", "path": rel_path})
+    except Exception as e:
+        logger.error(f"Error saving template: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # --- OCR API ---
 
@@ -486,15 +644,16 @@ def delete_template(game, name):
 
 # --- Color API ---
 
+@api_bp.route("/pick-color", methods=["POST"])
 @api_bp.route("/color/pick", methods=["POST"])
 def pick_color():
     data = request.json
     image_path = data.get("image_path")
-    x_rel = data.get("x") # relative 0-1
-    y_rel = data.get("y") # relative 0-1
+    x_value = data.get("x") # relative 0-1, or legacy absolute pixel coordinate
+    y_value = data.get("y") # relative 0-1, or legacy absolute pixel coordinate
     tolerance = data.get("tolerance", [10, 50, 50])
     
-    if image_path is None or x_rel is None or y_rel is None:
+    if image_path is None or x_value is None or y_value is None:
         return jsonify({"error": "Missing parameters"}), 400
         
     if not os.path.exists(image_path):
@@ -503,8 +662,12 @@ def pick_color():
     try:
         with Image.open(image_path) as img:
             w, h = img.size
-            x = int(x_rel * w)
-            y = int(y_rel * h)
+            if 0 <= x_value <= 1 and 0 <= y_value <= 1:
+                x = int(x_value * w)
+                y = int(y_value * h)
+            else:
+                x = int(x_value)
+                y = int(y_value)
             # Ensure within bounds
             x = max(0, min(w - 1, x))
             y = max(0, min(h - 1, y))

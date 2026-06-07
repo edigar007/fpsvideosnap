@@ -78,17 +78,8 @@ class KillDetector:
             
         max_color_pct = 0.0
         for color_name, color_cfg in self.colors.items():
-            # 支持两种配置格式: hsv_lower/hsv_upper 或 lower/upper
-            hsv_lower = color_cfg.get('hsv_lower', color_cfg.get('lower'))
-            hsv_upper = color_cfg.get('hsv_upper', color_cfg.get('upper'))
-            
+            hsv_lower, hsv_upper = self._get_color_bounds(color_cfg)
             if hsv_lower and hsv_upper:
-                # 应用容差
-                tolerance = color_cfg.get('tolerance', 0)
-                if tolerance > 0:
-                    hsv_lower = [max(0, hsv_lower[0] - tolerance), max(0, hsv_lower[1] - tolerance), max(0, hsv_lower[2] - tolerance)]
-                    hsv_upper = [min(179, hsv_upper[0] + tolerance), min(255, hsv_upper[1] + tolerance), min(255, hsv_upper[2] + tolerance)]
-                
                 pct = self.cv.detect_color(
                     frame, 
                     hsv_lower, 
@@ -99,6 +90,41 @@ class KillDetector:
         
         profiler.end('prefilter_color_detection')
         return max_color_pct >= self.color_threshold, max_color_pct
+
+    def _get_color_bounds(self, color_cfg: dict) -> tuple:
+        """
+        Return HSV bounds for color detection.
+        Explicit lower/upper ranges are treated as final bounds; tolerance is only
+        applied when config stores a center HSV value.
+        """
+        hsv_lower = color_cfg.get('hsv_lower', color_cfg.get('lower'))
+        hsv_upper = color_cfg.get('hsv_upper', color_cfg.get('upper'))
+        if hsv_lower and hsv_upper:
+            return hsv_lower, hsv_upper
+
+        hsv = color_cfg.get('hsv')
+        if not hsv:
+            return None, None
+
+        tolerance = color_cfg.get('tolerance', 0)
+        if isinstance(tolerance, (int, float)):
+            tolerance = [tolerance, tolerance * 2, tolerance * 2]
+
+        if not isinstance(tolerance, (list, tuple)) or len(tolerance) != 3:
+            return None, None
+
+        return (
+            [
+                max(0, hsv[0] - tolerance[0]),
+                max(0, hsv[1] - tolerance[1]),
+                max(0, hsv[2] - tolerance[2]),
+            ],
+            [
+                min(179, hsv[0] + tolerance[0]),
+                min(255, hsv[1] + tolerance[1]),
+                min(255, hsv[2] + tolerance[2]),
+            ],
+        )
 
     def _calculate_confidence(self, signals: Dict) -> float:
         """
@@ -251,13 +277,8 @@ class KillDetector:
         else:
             max_color_conf = 0.0
             for color_name, color_cfg in colors_cfg.items():
-                hsv_lower = color_cfg.get('hsv_lower', color_cfg.get('lower'))
-                hsv_upper = color_cfg.get('hsv_upper', color_cfg.get('upper'))
+                hsv_lower, hsv_upper = self._get_color_bounds(color_cfg)
                 if hsv_lower and hsv_upper:
-                    tolerance = color_cfg.get('tolerance', 0)
-                    if tolerance > 0:
-                        hsv_lower = [max(0, hsv_lower[0] - tolerance), max(0, hsv_lower[1] - tolerance), max(0, hsv_lower[2] - tolerance)]
-                        hsv_upper = [min(179, hsv_upper[0] + tolerance), min(255, hsv_upper[1] + tolerance), min(255, hsv_upper[2] + tolerance)]
                     match_percent = self.cv.detect_color(frame, hsv_lower, hsv_upper, roi=roi)
                     max_color_conf = max(max_color_conf, min(match_percent * 50, 1.0))
             signals['color'] = max_color_conf
@@ -410,17 +431,8 @@ class KillDetector:
             # 重新计算（用于非批处理情况）
             max_color_conf = 0.0
             for color_name, color_cfg in self.colors.items():
-                # 支持两种配置格式: hsv_lower/hsv_upper 或 lower/upper
-                hsv_lower = color_cfg.get('hsv_lower', color_cfg.get('lower'))
-                hsv_upper = color_cfg.get('hsv_upper', color_cfg.get('upper'))
-                
+                hsv_lower, hsv_upper = self._get_color_bounds(color_cfg)
                 if hsv_lower and hsv_upper:
-                    # 应用容差
-                    tolerance = color_cfg.get('tolerance', 0)
-                    if tolerance > 0:
-                        hsv_lower = [max(0, hsv_lower[0] - tolerance), max(0, hsv_lower[1] - tolerance), max(0, hsv_lower[2] - tolerance)]
-                        hsv_upper = [min(179, hsv_upper[0] + tolerance), min(255, hsv_upper[1] + tolerance), min(255, hsv_upper[2] + tolerance)]
-                    
                     match_percent = self.cv.detect_color(frame, hsv_lower, hsv_upper, roi=self.roi)
                     # Boost confidence if color pattern is found
                     color_score = min(match_percent * 50, 1.0) 

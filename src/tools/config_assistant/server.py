@@ -29,24 +29,6 @@ def create_app():
     # Register blueprints
     app.register_blueprint(api_bp, url_prefix="/api")
 
-    # Initialize OCR Service (lazy load trigger in background)
-    # Note: OCR is lazy-initialized on first API call, so this just pre-warms it
-    def init_ocr():
-        try:
-            logger.info("Pre-loading OCR models...")
-            from src.tools.config_assistant.ocr_service import get_ocr_service
-            service = get_ocr_service()
-            # Trigger lazy initialization
-            service._ensure_initialized()
-            if service._detector is not None:
-                logger.info("OCR models loaded successfully.")
-            else:
-                logger.warning(f"OCR unavailable: {service._init_error or 'Unknown error'}")
-        except Exception as e:
-            logger.warning(f"OCR pre-loading failed (non-fatal): {e}")
-    
-    threading.Thread(target=init_ocr, daemon=True).start()
-    
     # Route to serve uploads
     @app.route('/uploads/<filename>')
     def uploaded_file(filename):
@@ -88,6 +70,23 @@ def run_server(port=8080, debug=False):
     app = create_app()
     upload_folder = app.config.get('UPLOAD_FOLDER')
     _cleanup_uploads(upload_folder)
+
+    # OCR remains lazy for API correctness, but pre-warm only for real server runs.
+    # create_app() is used by tests and should not spawn heavyweight workers.
+    def init_ocr():
+        try:
+            logger.info("Pre-loading OCR models...")
+            from src.tools.config_assistant.ocr_service import get_ocr_service
+            service = get_ocr_service()
+            service._ensure_initialized()
+            if service._detector is not None:
+                logger.info("OCR models loaded successfully.")
+            else:
+                logger.warning(f"OCR unavailable: {service._init_error or 'Unknown error'}")
+        except Exception as e:
+            logger.warning(f"OCR pre-loading failed (non-fatal): {e}")
+
+    threading.Thread(target=init_ocr, daemon=True).start()
 
     try:
         chosen_port = _find_available_port(port)

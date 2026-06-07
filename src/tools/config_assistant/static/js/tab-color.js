@@ -7,9 +7,7 @@ class ColorTab {
         this.colorList = document.getElementById('color-sampler-list');
         this.startBtn = document.getElementById('start-color-sample');
         this.colors = {}; // { name: { hsv_lower, hsv_upper, tolerance } }
-        
-        this.activeColor = null; // Currently being edited/sampled
-        
+
         this.init();
     }
 
@@ -21,18 +19,15 @@ class ColorTab {
         }
 
         document.addEventListener('colorSampled', (e) => {
-            this.onColorSampled(e.detail.pos, e.detail.inner);
+            this.onColorSampled(e.detail.pos);
         });
 
         document.addEventListener('tabChanged', (e) => {
             if (e.detail.tabId === 'colors') {
                 this.refreshList();
-            } else {
-                // Clear highlight when leaving
-                if (window.canvasState) {
-                    window.canvasState.colorMask = null;
-                    window.canvasState.render();
-                }
+            } else if (window.canvasState) {
+                window.canvasState.colorMask = null;
+                window.canvasState.render();
             }
         });
 
@@ -46,12 +41,17 @@ class ColorTab {
         this.refreshList();
     }
 
-    async onColorSampled(pos, inner) {
+    async onColorSampled(pos) {
         const game = document.getElementById('game-selector').value;
         if (!game) return alert('请先选择游戏');
-        
+
         const imagePath = window.app?.imagePath;
         if (!imagePath) return alert('请先上传图片');
+
+        if (!window.canvasState?.canvas) return;
+        const canvas = window.canvasState.canvas;
+        const x = pos.x / canvas.width;
+        const y = pos.y / canvas.height;
 
         try {
             const response = await fetch('/api/color/pick', {
@@ -59,35 +59,37 @@ class ColorTab {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     image_path: imagePath,
-                    x: inner.x,
-                    y: inner.y,
-                    tolerance: [10, 50, 50]
+                    x,
+                    y,
+                    tolerance: [20, 40, 40]
                 })
             });
 
-            if (response.ok) {
-                const data = await response.json();
-                // data: { hsv: [h, s, v], rgb: [r, g, b] }
-                const name = prompt('请输入颜色名称 (如: kill_red, headshot_yellow):');
-                if (!name) return;
-
-                await this.addColor(name, data.hsv);
+            if (!response.ok) {
+                const err = await response.json();
+                return alert('颜色采样失败: ' + (err.error || '未知错误'));
             }
+
+            const data = await response.json();
+            const name = prompt('请输入颜色名称 (如: kill_red, headshot_yellow):');
+            if (!name) return;
+
+            await this.addColor(name, data);
         } catch (err) {
             console.error('Color sample error:', err);
+            alert('颜色采样失败');
         }
     }
 
-    async addColor(name, hsv) {
+    async addColor(name, sample) {
         const game = document.getElementById('game-selector').value;
         const tolerance = 20;
-        const lower = [Math.max(0, hsv[0]-tolerance), Math.max(0, hsv[1]-tolerance*2), Math.max(0, hsv[2]-tolerance*2)];
-        const upper = [Math.min(180, hsv[0]+tolerance), Math.min(255, hsv[1]+tolerance*2), Math.min(255, hsv[2]+tolerance*2)];
 
         const payload = {
             name: name,
-            hsv_lower: lower,
-            hsv_upper: upper,
+            hsv: sample.hsv,
+            hsv_lower: sample.hsv_range.lower,
+            hsv_upper: sample.hsv_range.upper,
             tolerance: tolerance
         };
 
@@ -103,19 +105,15 @@ class ColorTab {
                 body: JSON.stringify(payload)
             });
 
-            if (response.ok) {
-                const data = await response.json();
-                
-                if (currentRule) {
-                    const rule = data.config.detection.rules.find(r => r.name === currentRule);
-                    this.colors = rule.detection_overrides?.colors || {};
-                } else {
-                    this.colors = data.config.detection.colors;
-                }
-                
-                this.refreshList();
-                if (window.configPreview) window.configPreview.update(data.config);
+            if (!response.ok) {
+                const err = await response.json();
+                return alert('添加颜色失败: ' + (err.error || '未知错误'));
             }
+
+            const data = await response.json();
+            this.syncColorsFromConfig(data.config, currentRule);
+            this.refreshList();
+            if (window.configPreview) window.configPreview.update(data.config);
         } catch (err) {
             console.error('Add color error:', err);
         }
@@ -135,7 +133,7 @@ class ColorTab {
             const colorData = this.colors[name];
             const item = document.createElement('div');
             item.className = 'color-item';
-            
+
             const header = document.createElement('div');
             header.className = 'color-header';
             header.innerHTML = `
@@ -148,7 +146,7 @@ class ColorTab {
 
             const body = document.createElement('div');
             body.className = 'color-body';
-            
+
             const toleranceGroup = document.createElement('div');
             toleranceGroup.className = 'form-group mt-05';
             toleranceGroup.innerHTML = `
@@ -158,13 +156,13 @@ class ColorTab {
 
             const slider = toleranceGroup.querySelector('.tolerance-slider');
             const tolVal = toleranceGroup.querySelector('.tol-val');
-            
+
             slider.oninput = (e) => {
                 tolVal.textContent = e.target.value;
             };
-            
+
             slider.onchange = (e) => {
-                this.updateColorTolerance(name, parseInt(e.target.value));
+                this.updateColorTolerance(name, parseInt(e.target.value, 10));
             };
 
             header.querySelector('.preview-btn').onclick = () => this.previewColor(name);
@@ -179,7 +177,6 @@ class ColorTab {
 
     async updateColorTolerance(name, tolerance) {
         const game = document.getElementById('game-selector').value;
-        
         const payload = { tolerance };
         const currentRule = window.app?.currentRuleName;
         if (currentRule) {
@@ -192,19 +189,12 @@ class ColorTab {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+
             if (response.ok) {
                 const data = await response.json();
-                
-                // Update logic handled by refresh usually, but here we can optimize
-                if (currentRule) {
-                    const rule = data.config.detection.rules.find(r => r.name === currentRule);
-                    this.colors = rule.detection_overrides?.colors || {};
-                } else {
-                    this.colors = data.config.detection.colors;
-                }
-                
+                this.syncColorsFromConfig(data.config, currentRule);
+                this.refreshList();
                 if (window.configPreview) window.configPreview.update(data.config);
-                // Auto refresh preview if it was active
                 this.previewColor(name);
             }
         } catch (err) {
@@ -212,79 +202,18 @@ class ColorTab {
         }
     }
 
-    async deleteColor(name) {
-        if (!confirm(`确定要删除颜色 "${name}" 吗？`)) return;
-        const game = document.getElementById('game-selector').value;
-        
-        const currentRule = window.app?.currentRuleName;
-        let url = `/api/config/${game}/colors/${name}`;
-        if (currentRule) {
-            url += `?rule_name=${encodeURIComponent(currentRule)}`;
-        }
-
-        try {
-            const response = await fetch(url, {
-                method: 'DELETE'
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                
-                if (currentRule) {
-                    const rule = data.config.detection.rules.find(r => r.name === currentRule);
-                    this.colors = rule.detection_overrides?.colors || {};
-                } else {
-                    this.colors = data.config.detection.colors;
-                }
-                
-                this.refreshList();
-                if (window.configPreview) window.configPreview.update(data.config);
-                window.canvasState.colorMask = null;
-                window.canvasState.render();
-            }
-        } catch (err) {
-            console.error('Delete color error:', err);
-        }
-    }
-
-    loadRuleColors(ruleName) {
-        const config = window.app?.config;
-        if (!config?.detection) return;
-        
-        let colors = config.detection.colors || {}; // default global
-        
-        if (ruleName) {
-            const rules = config.detection.rules || [];
-            const rule = rules.find(r => r.name === ruleName);
-            if (rule?.detection_overrides?.colors) {
-                colors = rule.detection_overrides.colors;
-            }
-        }
-        
-        this.setColors(colors);
-        if (window.app?.showStatus) {
-            window.app.showStatus(ruleName ? `已加载规则 ${ruleName} 的颜色` : '已加载全局颜色');
-        }
-    }
-}
-        } catch (err) {
-            console.error('Update color tolerance error:', err);
-        }
-    }
-
     async previewColor(name) {
-        const game = document.getElementById('game-selector').value;
-        const roi = window.canvasState.roi;
+        const roi = window.canvasState?.roi;
         const imagePath = window.app?.imagePath;
-        
+
         if (!roi) return;
         if (!imagePath) return alert('请先上传图片');
-        
+
         const color = this.colors[name];
         if (!color) return;
 
         try {
-            const response = await fetch(`/api/color/preview`, {
+            const response = await fetch('/api/color/preview', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -299,16 +228,16 @@ class ColorTab {
                 const blob = await response.blob();
                 const img = new Image();
                 img.onload = () => {
-                    // Create ImageData from Blob
                     const canvas = document.createElement('canvas');
                     canvas.width = img.width;
                     canvas.height = img.height;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0);
                     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                    
+
                     window.canvasState.colorMask = imageData;
                     window.canvasState.render();
+                    URL.revokeObjectURL(img.src);
                 };
                 img.src = URL.createObjectURL(blob);
             }
@@ -320,14 +249,19 @@ class ColorTab {
     async deleteColor(name) {
         if (!confirm(`确定要删除颜色 "${name}" 吗？`)) return;
         const game = document.getElementById('game-selector').value;
+
+        const currentRule = window.app?.currentRuleName;
+        let url = `/api/config/${game}/colors/${name}`;
+        if (currentRule) {
+            url += `?rule_name=${encodeURIComponent(currentRule)}`;
+        }
+
         try {
-            const response = await fetch(`/api/config/${game}/colors/${name}`, {
-                method: 'DELETE'
-            });
+            const response = await fetch(url, { method: 'DELETE' });
 
             if (response.ok) {
                 const data = await response.json();
-                this.colors = data.config.detection.colors;
+                this.syncColorsFromConfig(data.config, currentRule);
                 this.refreshList();
                 if (window.configPreview) window.configPreview.update(data.config);
                 window.canvasState.colorMask = null;
@@ -337,9 +271,40 @@ class ColorTab {
             console.error('Delete color error:', err);
         }
     }
+
+    loadRuleColors(ruleName) {
+        const config = window.app?.config;
+        if (!config?.detection) return;
+
+        let colors = config.detection.colors || {};
+
+        if (ruleName) {
+            const rules = config.detection.rules || [];
+            const rule = rules.find(r => r.name === ruleName);
+            if (rule?.detection_overrides?.colors) {
+                colors = rule.detection_overrides.colors;
+            }
+        }
+
+        this.setColors(colors);
+        if (window.app?.showStatus) {
+            window.app.showStatus(ruleName ? `已加载规则 ${ruleName} 的颜色` : '已加载全局颜色');
+        }
+    }
+
+    syncColorsFromConfig(config, ruleName) {
+        if (ruleName) {
+            const rule = config.detection.rules.find(r => r.name === ruleName);
+            this.colors = rule?.detection_overrides?.colors || {};
+        } else {
+            this.colors = config.detection.colors || {};
+        }
+        if (window.app) {
+            window.app.config = config;
+        }
+    }
 }
 
-// Initialize when DOM ready
 document.addEventListener('DOMContentLoaded', () => {
     window.colorTab = new ColorTab();
 });
