@@ -17,7 +17,12 @@ setup(
         "rich",
         "psutil",
         "flask",
-        "Pillow"
+        "Pillow",
+        "paddlepaddle-gpu",
+        "paddleocr",
+        "easyocr",
+        "python-Levenshtein",
+        "fuzzywuzzy",
     ],
     entry_points={
         "console_scripts": [

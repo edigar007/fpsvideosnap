@@ -43,10 +43,44 @@ class ConfigLoader:
 
     def _validate_config(self, config: Dict[str, Any]):
         """Validates critical configuration fields."""
+        video = config.get('video', {})
+        frame_extraction_mode = video.get('frame_extraction_mode')
+        if frame_extraction_mode is not None and frame_extraction_mode not in {'bulk', 'precise'}:
+            raise ValueError("video.frame_extraction_mode must be 'bulk' or 'precise'")
+
+        highlights = config.get('highlights', {})
+        for key in ('pre_kill_time', 'post_kill_time'):
+            if key in highlights and (
+                not isinstance(highlights[key], (int, float)) or highlights[key] < 0
+            ):
+                raise ValueError(f"highlights.{key} must be a non-negative number")
+
+        for key in ('game_volume', 'music_volume'):
+            if key in highlights and (
+                not isinstance(highlights[key], (int, float)) or not 0 <= highlights[key] <= 1
+            ):
+                raise ValueError(f"highlights.{key} must be between 0 and 1")
+
         if 'detection' not in config:
             return
             
         det = config['detection']
+
+        if 'killfeed_roi' in det:
+            self._validate_roi(det['killfeed_roi'], 'detection.killfeed_roi')
+
+        if 'templates' in det and isinstance(det['templates'], dict):
+            for name, template_cfg in det['templates'].items():
+                if isinstance(template_cfg, dict) and 'roi' in template_cfg:
+                    self._validate_roi(template_cfg['roi'], f"detection.templates.{name}.roi")
+
+        if 'colors' in det and isinstance(det['colors'], dict):
+            for name, color_cfg in det['colors'].items():
+                if not isinstance(color_cfg, dict):
+                    raise ValueError(f"detection.colors.{name} must be a dict")
+                for key in ('hsv_lower', 'hsv_upper'):
+                    if key in color_cfg:
+                        self._validate_hsv(color_cfg[key], f"detection.colors.{name}.{key}")
         
         # Validate OCR settings
         if 'ocr' in det:
@@ -61,9 +95,14 @@ class ConfigLoader:
         # Validate Weights (must sum to approx 1.0 or just be positive)
         if 'weights' in det:
             weights = det['weights']
+            positive_count = 0
             for k, v in weights.items():
                 if not isinstance(v, (int, float)) or v < 0:
                     raise ValueError(f"Weight for {k} must be a non-negative number")
+                if v > 0:
+                    positive_count += 1
+            if weights and positive_count == 0:
+                raise ValueError("detection.weights must contain at least one positive value")
                     
         # Validate Prefilter
         if 'prefilter' in det:
@@ -121,6 +160,63 @@ class ConfigLoader:
                             f"{prefix}.require[{j}] '{signal}' is not a valid signal. "
                             f"Allowed: {', '.join(sorted(allowed_signals))}"
                         )
+
+                overrides = rule.get('detection_overrides', {})
+                if overrides:
+                    if not isinstance(overrides, dict):
+                        raise ValueError(f"{prefix}.detection_overrides must be a dict")
+                    if 'killfeed_roi' in overrides:
+                        self._validate_roi(overrides['killfeed_roi'], f"{prefix}.detection_overrides.killfeed_roi")
+                    if 'ocr' in overrides:
+                        ocr_override = overrides['ocr']
+                        if not isinstance(ocr_override, dict):
+                            raise ValueError(f"{prefix}.detection_overrides.ocr must be a dict")
+                        threshold = ocr_override.get('similarity_threshold')
+                        if threshold is not None and not 0 <= threshold <= 1:
+                            raise ValueError(
+                                f"{prefix}.detection_overrides.ocr.similarity_threshold "
+                                "must be between 0 and 1"
+                            )
+                    if 'colors' in overrides and isinstance(overrides['colors'], dict):
+                        for color_name, color_cfg in overrides['colors'].items():
+                            if not isinstance(color_cfg, dict):
+                                raise ValueError(f"{prefix}.detection_overrides.colors.{color_name} must be a dict")
+                            for key in ('hsv_lower', 'hsv_upper'):
+                                if key in color_cfg:
+                                    self._validate_hsv(
+                                        color_cfg[key],
+                                        f"{prefix}.detection_overrides.colors.{color_name}.{key}",
+                                    )
+
+    def _validate_roi(self, roi: Any, field_name: str):
+        if (
+            not isinstance(roi, list)
+            or len(roi) != 4
+            or not all(isinstance(value, (int, float)) for value in roi)
+        ):
+            raise ValueError(f"{field_name} must be a list of 4 numbers")
+
+        _x, _y, width, height = roi
+        if not all(0.0 <= value <= 1.0 for value in roi):
+            raise ValueError(f"{field_name} values must be between 0.0 and 1.0")
+        if width <= 0 or height <= 0:
+            raise ValueError(f"{field_name} width and height must be greater than 0")
+
+    def _validate_hsv(self, hsv: Any, field_name: str):
+        if (
+            not isinstance(hsv, list)
+            or len(hsv) != 3
+            or not all(isinstance(value, (int, float)) for value in hsv)
+        ):
+            raise ValueError(f"{field_name} must be a list of 3 numbers")
+
+        hue, saturation, value = hsv
+        if not 0 <= hue <= 180:
+            raise ValueError(f"{field_name}[0] hue must be between 0 and 180")
+        if not 0 <= saturation <= 255:
+            raise ValueError(f"{field_name}[1] saturation must be between 0 and 255")
+        if not 0 <= value <= 255:
+            raise ValueError(f"{field_name}[2] value must be between 0 and 255")
 
     def _load_yaml(self, path: str) -> Dict[str, Any]:
         with open(path, 'r', encoding='utf-8') as f:

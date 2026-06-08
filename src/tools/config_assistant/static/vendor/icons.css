@@ -1,0 +1,39 @@
+.fas {
+    display: inline-block;
+    width: 1em;
+    text-align: center;
+    font-style: normal;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.fa-spin {
+    animation: spin 1s linear infinite;
+}
+
+.fa-bolt-lightning::before { content: "!!"; }
+.fa-plus::before { content: "+"; }
+.fa-upload::before { content: "^"; }
+.fa-vial::before { content: "T"; }
+.fa-save::before { content: "S"; }
+.fa-cloud-arrow-up::before { content: "^"; }
+.fa-minus::before { content: "-"; }
+.fa-expand::before { content: "[]"; }
+.fa-border-all::before { content: "#"; }
+.fa-vector-square::before { content: "□"; }
+.fa-font::before { content: "A"; }
+.fa-clone::before { content: "▣"; }
+.fa-palette::before { content: "●"; }
+.fa-code-branch::before { content: "Y"; }
+.fa-circle-info::before { content: "i"; }
+.fa-check::before { content: "✓"; }
+.fa-crosshairs::before { content: "+"; }
+.fa-code::before { content: "{}"; }
+.fa-copy::before { content: "C"; }
+.fa-times::before { content: "x"; }
+.fa-image::before { content: "▧"; }
+.fa-trash::before { content: "×"; }
+.fa-triangle-exclamation::before { content: "!"; }
+.fa-spinner::before { content: "○"; }
+.fa-globe::before { content: "G"; }
+.fa-eye::before { content: "E"; }

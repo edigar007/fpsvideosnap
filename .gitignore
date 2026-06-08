@@ -31,10 +31,10 @@ Thumbs.db
 # Logs and temp
 *.log
 *.tmp
-temp/
-output/
-history/
-assets/
+/temp/
+/output/
+/history/
+/assets/
 
 # Model and data
 models/

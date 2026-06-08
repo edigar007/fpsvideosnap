@@ -47,10 +47,13 @@ video:
   frame_extraction_mode: "bulk"
 
 # AI Detection settings
+ai:
+  batch_size: 16
+
 detection:
   model_path: "models/yolov8n.pt"
   confidence_threshold: 0.5
-  batch_size: 16
+  chunk_size: 256
   # Time window for kill detection (seconds)
   time_window: 2.0
   # Default ROI (Region of Interest) for UI elements [x, y, w, h] as percentages (0.0 - 1.0)
