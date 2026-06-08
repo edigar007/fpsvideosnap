@@ -79,3 +79,39 @@ def test_detection_config_view_section_defaults_are_stable():
     assert view.colors.values == ()
     assert view.prefilter.enabled is True
     assert view.prefilter.color_threshold == 0.01
+
+
+def test_detection_config_view_parses_bool_strings_without_truthy_fallback():
+    view = DetectionConfigView.from_config(
+        {
+            "ocr": {
+                "enabled": "false",
+                "required": "true",
+                "use_gpu": "off",
+            },
+            "prefilter": {"enabled": "0"},
+        }
+    )
+
+    assert view.ocr.enabled is False
+    assert view.ocr.required is True
+    assert view.ocr.use_gpu is False
+    assert view.prefilter.enabled is False
+
+
+def test_detection_config_view_invalid_bool_strings_use_defaults():
+    view = DetectionConfigView.from_config(
+        {
+            "ocr": {
+                "enabled": "maybe",
+                "required": "unknown",
+                "use_gpu": "invalid",
+            },
+            "prefilter": {"enabled": "invalid"},
+        }
+    )
+
+    assert view.ocr.enabled is False
+    assert view.ocr.required is False
+    assert view.ocr.use_gpu is True
+    assert view.prefilter.enabled is True

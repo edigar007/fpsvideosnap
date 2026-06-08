@@ -21,7 +21,15 @@ def _as_float(value: Any, default: float) -> float:
 def _as_bool(value: Any, default: bool) -> bool:
     if value is None:
         return default
-    return bool(value)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return default
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any]:

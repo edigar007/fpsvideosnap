@@ -301,8 +301,11 @@ def run_processing_task(videos: List[str], game: str, progress_queue, result_que
 
             from src.pipeline.multi_video import merge_clips_to_highlight
 
-            merged_result = merge_clips_to_highlight(config, videos, all_clips)
+            merged_result = merge_clips_to_highlight(config, videos, all_clips, cancel_event=cancel_event)
             if cancel_event.is_set():
+                result_queue.put(_cancelled_result("merge"))
+                return
+            if merged_result and merged_result.get("cancelled"):
                 result_queue.put(_cancelled_result("merge"))
                 return
 

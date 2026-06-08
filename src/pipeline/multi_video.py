@@ -11,6 +11,21 @@ from src.video.video_joiner import VideoJoiner
 logger = get_logger(__name__)
 
 
+def _is_cancelled(cancel_event: Any) -> bool:
+    return bool(cancel_event and cancel_event.is_set())
+
+
+def _cancelled_merge_result(stage: str, clips: List[Dict[str, Any]], source_videos: List[str]) -> Dict[str, Any]:
+    return {
+        "path": "MERGED",
+        "success": False,
+        "cancelled": True,
+        "stage": stage,
+        "total_clips": len(clips),
+        "source_videos": len(source_videos),
+    }
+
+
 def merge_clips_to_highlight(
     config: Dict[str, Any],
     source_videos: List[str],
@@ -19,6 +34,7 @@ def merge_clips_to_highlight(
     video_joiner_cls: Type[VideoJoiner] = VideoJoiner,
     audio_mixer_cls: Type[AudioMixer] = AudioMixer,
     report_generator_cls: Type[ReportGenerator] = ReportGenerator,
+    cancel_event: Any = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Merge clips from multiple videos into one final highlight and report.
@@ -35,6 +51,9 @@ def merge_clips_to_highlight(
         logger.warning("[yellow]No clip paths available. Nothing to merge.[/yellow]")
         return None
 
+    if _is_cancelled(cancel_event):
+        return _cancelled_merge_result("merge_join", clips, source_videos)
+
     timestamp = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = config.get("global", {}).get("output_dir", "output")
     os.makedirs(output_dir, exist_ok=True)
@@ -47,8 +66,14 @@ def merge_clips_to_highlight(
         logger.error("[red]Failed to merge clips.[/red]")
         return None
 
+    if _is_cancelled(cancel_event):
+        return _cancelled_merge_result("merge_audio", clips, source_videos)
+
     mixer = audio_mixer_cls(config)
     result_path = mixer.mix_audio(merged_no_audio, final_output)
+
+    if _is_cancelled(cancel_event):
+        return _cancelled_merge_result("merge_report", clips, source_videos)
 
     if result_path == merged_no_audio:
         shutil.copy2(merged_no_audio, final_output)
@@ -77,4 +102,3 @@ def merge_clips_to_highlight(
         "source_videos": len(source_videos),
         "report_path": report_path,
     }
-

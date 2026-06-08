@@ -319,7 +319,7 @@ def test_processing_task_cancel_after_multi_video_merge_returns_cancelled(tmp_pa
                 clips=self.results["clips"],
             )
 
-    def merge_and_cancel(config, input_videos, clips):
+    def merge_and_cancel(config, input_videos, clips, **kwargs):
         cancel_event.set()
         return {"final_video": str(tmp_path / "merged.mp4")}
 
@@ -336,3 +336,45 @@ def test_processing_task_cancel_after_multi_video_merge_returns_cancelled(tmp_pa
     assert result["status"] == "cancelled"
     assert result["stage"] == "merge"
     merge.assert_called_once()
+
+
+def test_processing_task_merge_cancelled_result_returns_cancelled(tmp_path):
+    videos = [str(tmp_path / "input1.mp4"), str(tmp_path / "input2.mp4")]
+    progress_queue = Queue()
+    result_queue = Queue()
+
+    class ClipsPipeline:
+        def __init__(self, config, progress_callback=None):
+            self.results = {"frames": [], "events": [], "clips": []}
+            self.stages = {name: type("Stage", (), {"status": StageStatus.PENDING})() for name in [
+                "metadata",
+                "frames",
+                "detection",
+                "clips",
+                "join",
+                "audio",
+            ]}
+
+        def run_until_clips_result(self, path):
+            self.results["clips"] = [{"path": f"{path}.clip.mp4"}]
+            return PipelineRunResult(
+                success=True,
+                mode="clips",
+                video_path=path,
+                clips=self.results["clips"],
+            )
+
+    merge = Mock(return_value={"success": False, "cancelled": True, "stage": "merge_audio"})
+
+    with patch("src.config.config_loader.get_config", return_value={}), \
+         patch("src.pipeline.pipeline.Pipeline", ClipsPipeline), \
+         patch("src.pipeline.multi_video.merge_clips_to_highlight", merge):
+        _run_processing_task(videos, "battlefield6", progress_queue, result_queue, _CancelEvent())
+
+    result = result_queue.get_nowait()
+
+    assert result["success"] is False
+    assert result["status"] == "cancelled"
+    assert result["stage"] == "merge"
+    merge.assert_called_once()
+    assert merge.call_args.kwargs["cancel_event"].is_set() is False
