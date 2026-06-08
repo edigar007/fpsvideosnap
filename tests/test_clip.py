@@ -1,5 +1,4 @@
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from src.clip.time_calculator import TimeCalculator
 from src.clip.overlap_merger import OverlapMerger
 from src.clip.multikill_detector import MultiKillDetector

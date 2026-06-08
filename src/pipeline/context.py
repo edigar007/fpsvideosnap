@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Optional
 
 
 @dataclass
@@ -10,3 +10,4 @@ class PipelineContext:
     temp_dir: str
     checkpoint_file: str = ""
     results: Dict[str, Any] = field(default_factory=dict)
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None

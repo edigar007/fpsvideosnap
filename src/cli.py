@@ -81,9 +81,28 @@ def parse_args():
         help="Enable debug mode for the Flask server"
     )
 
+    validate_parser = subparsers.add_parser("validate-config", help="Validate a game configuration")
+    validate_parser.add_argument(
+        "--game",
+        type=str,
+        default="battlefield6",
+        help="Game-specific config to validate (default: battlefield6)",
+    )
+    validate_parser.add_argument(
+        "--config",
+        type=str,
+        help="Optional path to an override YAML config file",
+    )
+    validate_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging",
+    )
+
     # Default to 'run' if no command is provided and we have arguments
     # This maintains backward compatibility for `python main.py --video ...`
-    if len(sys.argv) > 1 and sys.argv[1] not in ["run", "config-assistant", "dashboard", "-h", "--help"]:
+    commands = ["run", "config-assistant", "dashboard", "validate-config"]
+    if len(sys.argv) > 1 and sys.argv[1] not in commands + ["-h", "--help"]:
         sys.argv.insert(1, "run")
     
     # If no arguments at all, show help

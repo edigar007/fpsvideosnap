@@ -32,7 +32,7 @@ def visualize_color_detection(image_path: str, game_name: str = "battlefield6"):
     roi = detection_cfg.get('killfeed_roi', [0, 0, 1, 1])
     colors = detection_cfg.get('colors', {})
     
-    print(f"\n配置信息:")
+    print("\n配置信息:")
     print(f"  ROI: {roi}")
     print(f"  定义的颜色数: {len(colors)}")
     
@@ -91,7 +91,7 @@ def visualize_color_detection(image_path: str, game_name: str = "battlefield6"):
         if tolerance > 0:
             hsv_lower = [max(0, hsv_lower[0] - tolerance), max(0, hsv_lower[1] - tolerance), max(0, hsv_lower[2] - tolerance)]
             hsv_upper = [min(179, hsv_upper[0] + tolerance), min(255, hsv_upper[1] + tolerance), min(255, hsv_upper[2] + tolerance)]
-            print(f"  应用容差后:")
+            print("  应用容差后:")
             print(f"    下限: {hsv_lower}")
             print(f"    上限: {hsv_upper}")
         
@@ -145,7 +145,7 @@ def visualize_color_detection(image_path: str, game_name: str = "battlefield6"):
     cv2.imwrite(str(output_dir / "06_h_channel.jpg"), h_channel)
     cv2.imwrite(str(output_dir / "07_s_channel.jpg"), s_channel)
     cv2.imwrite(str(output_dir / "08_v_channel.jpg"), v_channel)
-    print(f"已保存: HSV 通道图 (H, S, V)")
+    print("已保存: HSV 通道图 (H, S, V)")
     
     # 6. 采样 ROI 中心点的 HSV 值
     roi_h, roi_w = roi_img.shape[:2]
@@ -160,7 +160,7 @@ def visualize_color_detection(image_path: str, game_name: str = "battlefield6"):
         ("右下", roi_h * 3 // 4, roi_w * 3 // 4),
     ]
     
-    print(f"\n" + "="*60)
+    print("\n" + "="*60)
     print(" ROI 采样点 HSV 值")
     print("="*60)
     
@@ -172,7 +172,7 @@ def visualize_color_detection(image_path: str, game_name: str = "battlefield6"):
             print(f"  BGR: {bgr_val}")
             print(f"  HSV: H={hsv_val[0]}, S={hsv_val[1]}, V={hsv_val[2]}")
     
-    print(f"\n" + "="*60)
+    print("\n" + "="*60)
     print(" 建议")
     print("="*60)
     
@@ -181,14 +181,14 @@ def visualize_color_detection(image_path: str, game_name: str = "battlefield6"):
         worst_color = min(all_masks, key=lambda x: x[2])
         if worst_color[2] < 0.01:  # 小于 1%
             print(f"\n颜色 '{worst_color[0]}' 匹配率极低 ({worst_color[2]:.4%})")
-            print(f"建议:")
+            print("建议:")
             print(f"  1. 查看生成的图片，特别是 04_mask_{worst_color[0]}.jpg")
-            print(f"  2. 使用上面的采样点 HSV 值来调整配置")
-            print(f"  3. 扩大 HSV 范围或增加 tolerance 值")
-            print(f"  4. 如果 ROI 中根本没有这个颜色，可以考虑禁用颜色预过滤")
+            print("  2. 使用上面的采样点 HSV 值来调整配置")
+            print("  3. 扩大 HSV 范围或增加 tolerance 值")
+            print("  4. 如果 ROI 中根本没有这个颜色，可以考虑禁用颜色预过滤")
     
     print(f"\n所有可视化文件已保存到: {output_dir}/")
-    print(f"请检查这些图片来诊断颜色检测问题。")
+    print("请检查这些图片来诊断颜色检测问题。")
 
 if __name__ == "__main__":
     import argparse

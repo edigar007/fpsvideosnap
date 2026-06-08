@@ -7,8 +7,9 @@ from src.audio.audio_info import AudioInfo
 class MusicProcessor:
     """Processes background music to match target video duration."""
     
-    def __init__(self, ffmpeg_path: str = "ffmpeg"):
+    def __init__(self, ffmpeg_path: str = "ffmpeg", ffprobe_path: str = "ffprobe"):
         self.ffmpeg_path = ffmpeg_path
+        self.ffprobe_path = ffprobe_path
 
     def process_music(self, music_path: str, target_duration: float, output_path: str = None) -> str:
         """
@@ -21,7 +22,7 @@ class MusicProcessor:
         if output_path is None:
             output_path = temp_manager.get_temp_path("processed_music.wav")
 
-        info = AudioInfo(music_path)
+        info = AudioInfo(music_path, ffprobe_path=self.ffprobe_path)
         music_duration = info.duration
         
         logger.info(f"Processing music: {music_path} ({music_duration}s) -> {target_duration}s")
@@ -57,14 +58,14 @@ class MusicProcessor:
             return output_path
         except subprocess.CalledProcessError as e:
             logger.error(f"FFmpeg music processing failed: {e.stderr.decode()}")
-            raise RuntimeError(f"Music processing failed: {e}")
+            raise RuntimeError(f"Music processing failed: {e}") from e
 
     def validate_music(self, music_path: str) -> bool:
         """Validates if music file exists and is readable."""
         if not music_path or not os.path.exists(music_path):
             return False
         try:
-            AudioInfo(music_path)
+            AudioInfo(music_path, ffprobe_path=self.ffprobe_path)
             return True
         except Exception:
             return False

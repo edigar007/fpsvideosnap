@@ -3,7 +3,6 @@ import json
 import os
 import subprocess
 import threading
-import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -112,8 +111,8 @@ class PaddleOCRSubprocess:
 
             try:
                 msg = json.loads(line)
-            except Exception:
-                logger.warning(f"Unparseable worker line: {line}")
+            except json.JSONDecodeError as exc:
+                logger.warning(f"Unparseable worker line: {line} ({exc})")
                 continue
 
             if msg.get("type") == "ready":
@@ -154,8 +153,10 @@ class PaddleOCRSubprocess:
 
             msg = q.get(timeout=timeout_s or self._cfg.request_timeout_s)
             return msg
-        except Empty:
-            raise TimeoutError(f"PaddleOCR worker request timeout: {payload.get('cmd')}")
+        except Empty as exc:
+            raise TimeoutError(
+                f"PaddleOCR worker request timeout: {payload.get('cmd')}"
+            ) from exc
         finally:
             with self._lock:
                 self._pending.pop(req_id, None)
@@ -201,5 +202,5 @@ class PaddleOCRSubprocess:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     proc.kill()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"Failed to close PaddleOCR subprocess cleanly: {exc}")

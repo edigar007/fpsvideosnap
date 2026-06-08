@@ -1,8 +1,6 @@
 import os
 import shutil
 import pytest
-import json
-import yaml
 from src.report.report_generator import ReportGenerator
 from src.history.history_manager import HistoryManager
 
@@ -32,7 +30,13 @@ def test_report_generation(temp_dirs):
     
     clips = [
         {"start_ms": 1000, "end_ms": 6000, "kill_count": 1, "kill_type": "single_kill"},
-        {"start_ms": 20000, "end_ms": 30000, "kill_count": 3, "kill_type": "triple_kill", "events": [{"timestamp_ms": 25000}]}
+        {
+            "start_ms": 20000,
+            "end_ms": 30000,
+            "kill_count": 3,
+            "kill_type": "triple_kill",
+            "events": [{"timestamp_ms": 25000}],
+        },
     ]
     
     config = {
@@ -112,7 +116,8 @@ def test_history_cleanup_by_age(temp_dirs, monkeypatch):
     
     # Create an old file
     old_file = os.path.join(history_dir, "config_old.yaml")
-    with open(old_file, "w") as f: f.write("old")
+    with open(old_file, "w") as f:
+        f.write("old")
     
     # Set its mtime to 2 days ago
     two_days_ago = os.path.getmtime(old_file) - (2 * 24 * 3600)

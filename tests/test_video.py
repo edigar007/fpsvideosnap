@@ -74,7 +74,8 @@ class TestVideoProcessing(unittest.TestCase):
         
         # Invalid format
         invalid_file = os.path.join(self.test_dir, "test.txt")
-        with open(invalid_file, 'w') as f: f.write("not a video")
+        with open(invalid_file, 'w') as f:
+            f.write("not a video")
         
         with self.assertRaises(ValueError):
             VideoInfo(invalid_file)
@@ -132,7 +133,8 @@ class TestVideoProcessing(unittest.TestCase):
         temp_path = self.temp_manager.create_temp_dir("test_")
         full_filepath = self.temp_manager.get_temp_path("test.file", subdir="sub")
         
-        with open(full_filepath, 'w') as f: f.write("data")
+        with open(full_filepath, 'w') as f:
+            f.write("data")
         
         self.assertTrue(os.path.exists(temp_path))
         self.assertTrue(os.path.exists(full_filepath))

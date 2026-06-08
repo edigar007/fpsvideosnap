@@ -1,1 +1,1 @@
-from .report_generator import ReportGenerator
+from .report_generator import ReportGenerator as ReportGenerator

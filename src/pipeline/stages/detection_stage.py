@@ -9,6 +9,7 @@ from src.ai.kill_detector import KillDetector
 from src.ai.opencv_matcher import OpenCVMatcher
 from src.ai.timestamp_recorder import TimestampRecorder
 from src.ai.yolo_detector import YoloDetector
+from src.config.settings import AppSettings
 from src.debug.detection_debugger import DetectionDebugger
 from src.pipeline.context import PipelineContext
 from src.utils.logger import get_logger
@@ -53,20 +54,18 @@ def run_detection_stage(
 
     try:
         profiler.start("stage_detection_setup")
-        model_dir = context.config.get("ai", {}).get("model_dir", "models")
-        model_path = os.path.join(model_dir, "yolov8n.pt")
-        model_manager.model_path = model_path
+        settings = AppSettings.from_config(context.config)
+        detection_cfg = context.config.get("detection", {})
+        model_manager.model_path = settings.detection.model_path
         yolo_model = model_manager.load_model()
 
-        batch_size = context.config.get("ai", {}).get("batch_size", 16)
-        yolo_detector = yolo_detector_cls(yolo_model, batch_size=batch_size)
+        yolo_detector = yolo_detector_cls(yolo_model, batch_size=settings.ai.batch_size)
         opencv_matcher = opencv_matcher_cls(context.config)
         load_templates(opencv_matcher)
 
         kill_detector = kill_detector_cls(yolo_detector, opencv_matcher, context.config)
         profiler.end("stage_detection_setup")
 
-        detection_cfg = context.config.get("detection", {})
         logger.debug("KillDetector initialized with:")
         logger.debug(f"  Confidence threshold: {detection_cfg.get('confidence_threshold', 0.5)}")
         logger.debug(f"  ROI: {detection_cfg.get('killfeed_roi', [0, 0, 1, 1])}")
@@ -84,7 +83,7 @@ def run_detection_stage(
 
         detected_events: List[Dict[str, Any]] = []
         pbar = progress_factory(total=len(frames), desc=progress_desc)
-        chunk_size = context.config.get("detection", {}).get("chunk_size", 256)
+        chunk_size = settings.detection.chunk_size
 
         profiler.start("stage_detection_processing")
         for i in range(0, len(frames), chunk_size):
@@ -128,6 +127,15 @@ def run_detection_stage(
                 profiler.end("stage_detection_record_events")
 
             pbar.update(len(chunk_paths))
+            if context.progress_callback:
+                context.progress_callback(
+                    {
+                        "stage": "detection",
+                        "processed": min(i + len(chunk_paths), len(frames)),
+                        "total": len(frames),
+                        "detected": len(detected_events),
+                    }
+                )
 
         profiler.end("stage_detection_processing")
         pbar.close()

@@ -1,5 +1,5 @@
 import random
-from typing import List, Optional
+from typing import Optional
 from src.utils.logger import logger
 
 class TransitionManager:

@@ -46,7 +46,7 @@ print(f"✓ 拼接完成: {joined_video}")
 final_video = os.path.join(output_dir, f"{video_basename}_highlights.mp4")
 os.makedirs(output_dir, exist_ok=True)
 
-print(f"\n开始混音...")
+print("\n开始混音...")
 mixer = AudioMixer(config)
 result = mixer.mix_audio(joined_video, final_video)
 

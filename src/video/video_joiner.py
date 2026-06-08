@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import json
 from typing import List, Dict, Any, Tuple
 from src.utils.logger import logger
 from src.video.video_info import VideoInfo
@@ -22,6 +23,7 @@ class VideoJoiner:
         )
 
         self.ffmpeg_path = self.video_cfg.get("ffmpeg_path", "ffmpeg")
+        self.ffprobe_path = self.video_cfg.get("ffprobe_path", "ffprobe")
         self.encoder = self.video_cfg.get("encoder", "h264_nvenc")
         self.fps = self.video_cfg.get("fps", 60)
         self.bitrate = self.video_cfg.get("bitrate", "20M")
@@ -50,7 +52,7 @@ class VideoJoiner:
         join_inputs = clip_paths
 
         try:
-            if self.pre_normalize_clips:
+            if self.pre_normalize_clips or self._any_clip_missing_audio(clip_paths):
                 join_inputs, normalized_dir = self._prepare_join_inputs(clip_paths)
 
             logger.info(f"Joining {len(join_inputs)} clips with transitions...")
@@ -93,8 +95,56 @@ class VideoJoiner:
         ]
         return normalized_paths, normalized_dir
 
+    def _any_clip_missing_audio(self, clip_paths: List[str]) -> bool:
+        return any(not self._has_audio_stream(path) for path in clip_paths)
+
+    def _has_audio_stream(self, input_path: str) -> bool:
+        cmd = [
+            self.ffprobe_path,
+            "-v",
+            "error",
+            "-select_streams",
+            "a",
+            "-show_entries",
+            "stream=index",
+            "-of",
+            "json",
+            input_path,
+        ]
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            data = json.loads(result.stdout or "{}")
+            return bool(data.get("streams"))
+        except Exception as exc:
+            logger.debug(f"Could not probe audio stream for {input_path}, assuming audio exists: {exc}")
+            return True
+
     def _normalize_clip_for_join(self, input_path: str, temp_dir: str, index: int) -> str:
         output_path = os.path.join(temp_dir, f"join_norm_{index + 1:03d}.mp4")
+        has_audio = self._has_audio_stream(input_path)
+        audio_input_label = "[0:a]"
+
+        cmd = [
+            self.ffmpeg_path,
+            "-y",
+            "-fflags", "+genpts",
+            "-i", input_path,
+        ]
+
+        if not has_audio:
+            duration = VideoInfo(input_path, ffprobe_path=self.ffprobe_path).duration
+            cmd.extend(
+                [
+                    "-f",
+                    "lavfi",
+                    "-t",
+                    f"{duration:.3f}",
+                    "-i",
+                    f"anullsrc=channel_layout={self.safe_channel_layout}:sample_rate={self.safe_audio_rate}",
+                ]
+            )
+            audio_input_label = "[1:a]"
+
         filter_complex = (
             f"[0:v]"
             f"fps={self.fps},"
@@ -103,17 +153,14 @@ class VideoJoiner:
             f"format=yuv420p,"
             f"settb=AVTB,"
             f"setpts=PTS-STARTPTS[vout];"
-            f"[0:a]"
+            f"{audio_input_label}"
             f"aformat=sample_rates={self.safe_audio_rate}:channel_layouts={self.safe_channel_layout},"
             f"aresample=async=1:first_pts=0,"
             f"asetpts=PTS-STARTPTS[aout]"
         )
 
-        cmd = [
-            self.ffmpeg_path,
-            "-y",
-            "-fflags", "+genpts",
-            "-i", input_path,
+        cmd.extend(
+            [
             "-filter_complex", filter_complex,
             "-map", "[vout]",
             "-map", "[aout]",
@@ -134,7 +181,8 @@ class VideoJoiner:
             "-avoid_negative_ts", "make_zero",
             "-max_interleave_delta", "0",
             output_path,
-        ]
+            ]
+        )
 
         logger.info(f"Normalizing clip for join: {input_path} -> {output_path}")
         subprocess.run(cmd, check=True, capture_output=True, text=True)
@@ -241,7 +289,7 @@ class VideoJoiner:
         durations = []
         for path in clip_paths:
             try:
-                info = VideoInfo(path)
+                info = VideoInfo(path, ffprobe_path=self.ffprobe_path)
                 duration = info.duration
                 if duration <= 0:
                     logger.error(f"Invalid duration {duration} for {path}")
@@ -273,7 +321,8 @@ class VideoJoiner:
             if durations[i - 1] < actual_transition_duration or durations[i] < actual_transition_duration:
                 actual_transition_duration = min(durations[i - 1], durations[i]) / 2
                 logger.warning(
-                    f"Clip {i - 1} or {i} is too short. Reducing transition duration to {actual_transition_duration:.2f}s"
+                    f"Clip {i - 1} or {i} is too short. "
+                    f"Reducing transition duration to {actual_transition_duration:.2f}s"
                 )
 
             offset = current_offset - actual_transition_duration

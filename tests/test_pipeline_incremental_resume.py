@@ -14,8 +14,7 @@ import os
 import json
 import pytest
 import tempfile
-import shutil
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import patch
 
 # Heavy dependencies are mocked in conftest.py
 
@@ -69,14 +68,11 @@ class TestCheckpointPathHash:
         with patch("src.pipeline.pipeline.temp_manager") as mock_temp:
             mock_temp.create_temp_dir.return_value = "/tmp/test_temp"
             
-            pipeline = Pipeline(base_config)
-            
             video_path = "D:\\videos\\my_gameplay.mp4"
             expected_hash = compute_path_hash(video_path)
             
             # Check that checkpoint file includes path hash
             checkpoint_name = f"checkpoint_my_gameplay_{expected_hash}.json"
-            expected_path = os.path.join("/tmp/test_temp", checkpoint_name)
             
             # Simulate what pipeline does internally
             base_name = os.path.splitext(os.path.basename(video_path))[0]
@@ -309,6 +305,90 @@ class TestCheckpointVersioning:
                 # Video path mismatch, should not resume
                 assert loaded is False
 
+    def test_missing_frame_artifact_invalidates_from_frames(self, base_config):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("src.pipeline.pipeline.temp_manager") as mock_temp:
+                mock_temp.create_temp_dir.return_value = tmpdir
+
+                pipeline = Pipeline(base_config)
+                video_path = os.path.abspath(os.path.join(tmpdir, "test_video.mp4"))
+                checkpoint_file = os.path.join(tmpdir, "checkpoint.json")
+                checkpoint_data = {
+                    "checkpoint_version": CHECKPOINT_VERSION,
+                    "video_path": video_path,
+                    "fingerprints": compute_config_fingerprints(base_config),
+                    "stages": {
+                        "metadata": {"status": "SUCCESS", "duration": 0},
+                        "frames": {"status": "SUCCESS", "duration": 0},
+                        "detection": {"status": "SUCCESS", "duration": 0},
+                    },
+                    "results": {
+                        "video_info": {"path": video_path, "duration": 1},
+                        "frames": [os.path.join(tmpdir, "missing_frame.jpg")],
+                    },
+                    "temp_dir": tmpdir,
+                }
+
+                with open(checkpoint_file, "w", encoding="utf-8") as f:
+                    json.dump(checkpoint_data, f)
+
+                loaded = pipeline._load_checkpoint(checkpoint_file, video_path)
+
+                assert loaded is True
+                assert pipeline.stages["metadata"].status == StageStatus.SUCCESS
+                assert pipeline.stages["frames"].status == StageStatus.PENDING
+                assert pipeline.stages["detection"].status == StageStatus.PENDING
+                assert "frames" not in pipeline.results
+
+    def test_missing_clip_artifact_invalidates_from_clips(self, base_config):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("src.pipeline.pipeline.temp_manager") as mock_temp:
+                mock_temp.create_temp_dir.return_value = tmpdir
+
+                pipeline = Pipeline(base_config)
+                video_path = os.path.abspath(os.path.join(tmpdir, "test_video.mp4"))
+                frame_path = os.path.join(tmpdir, "frame_1000.jpg")
+                detection_path = os.path.join(tmpdir, "detections.json")
+                checkpoint_file = os.path.join(tmpdir, "checkpoint.json")
+                with open(frame_path, "w", encoding="utf-8") as f:
+                    f.write("frame")
+                with open(detection_path, "w", encoding="utf-8") as f:
+                    json.dump([], f)
+
+                checkpoint_data = {
+                    "checkpoint_version": CHECKPOINT_VERSION,
+                    "video_path": video_path,
+                    "fingerprints": compute_config_fingerprints(base_config),
+                    "stages": {
+                        "metadata": {"status": "SUCCESS", "duration": 0},
+                        "frames": {"status": "SUCCESS", "duration": 0},
+                        "detection": {"status": "SUCCESS", "duration": 0},
+                        "clips": {"status": "SUCCESS", "duration": 0},
+                        "join": {"status": "SUCCESS", "duration": 0},
+                    },
+                    "results": {
+                        "video_info": {"path": video_path, "duration": 1},
+                        "frames": [frame_path],
+                        "events": [],
+                        "detection_json": detection_path,
+                        "clips": [{"path": os.path.join(tmpdir, "missing_clip.mp4")}],
+                        "joined_video": os.path.join(tmpdir, "joined.mp4"),
+                    },
+                    "temp_dir": tmpdir,
+                }
+
+                with open(checkpoint_file, "w", encoding="utf-8") as f:
+                    json.dump(checkpoint_data, f)
+
+                loaded = pipeline._load_checkpoint(checkpoint_file, video_path)
+
+                assert loaded is True
+                assert pipeline.stages["detection"].status == StageStatus.SUCCESS
+                assert pipeline.stages["clips"].status == StageStatus.PENDING
+                assert pipeline.stages["join"].status == StageStatus.PENDING
+                assert "clips" not in pipeline.results
+                assert "joined_video" not in pipeline.results
+
 
 class TestInvalidateFromStage:
     """Tests for the _invalidate_from_stage method."""
@@ -385,3 +465,119 @@ class TestConfigUnchangedFinalExists:
             # Should NOT need audio mixing
             assert final_exists is True
             assert need_audio is False, "Should skip audio when final exists and stage is SUCCESS"
+
+    @patch("src.pipeline.pipeline.temp_manager")
+    def test_audio_resume_prefers_saved_final_video_path(self, mock_temp_mgr, base_config):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_temp_mgr.create_temp_dir.return_value = tmpdir
+            base_config["global"]["output_dir"] = tmpdir
+
+            saved_final = os.path.join(tmpdir, "test_video_highlights_1.mp4")
+            with open(saved_final, "w", encoding="utf-8") as f:
+                f.write("dummy final video")
+
+            pipeline = Pipeline(base_config)
+            pipeline.stages["audio"].status = StageStatus.SUCCESS
+            pipeline.results["final_video"] = saved_final
+            context = pipeline._build_context("test_video.mp4", "test_video")
+
+            assert pipeline._run_audio_plan_stage(context, "joined.mp4", resume_completed=True) == saved_final
+
+
+class TestRunUntilClipsCheckpointNaming:
+    @patch("src.pipeline.pipeline.temp_manager")
+    def test_run_until_clips_checkpoint_includes_path_hash(self, mock_temp_mgr, base_config):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_temp_mgr.create_temp_dir.return_value = tmpdir
+            base_config["global"]["temp_dir"] = tmpdir
+            video_path = os.path.abspath(os.path.join(tmpdir, "same_name.mp4"))
+            expected_hash = compute_path_hash(video_path)
+
+            pipeline = Pipeline(base_config)
+
+            with patch.object(pipeline, "_run_plan", return_value=[]):
+                clips = pipeline.run_until_clips(video_path)
+
+            assert clips == []
+            assert os.path.basename(pipeline.checkpoint_file) == f"checkpoint_same_name_{expected_hash}.json"
+
+    @patch("src.pipeline.pipeline.temp_manager")
+    def test_run_until_clips_checkpoint_records_video_and_fingerprints(self, mock_temp_mgr, base_config):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_temp_mgr.create_temp_dir.return_value = tmpdir
+            base_config["global"]["temp_dir"] = tmpdir
+            video_path = os.path.abspath(os.path.join(tmpdir, "same_name.mp4"))
+
+            pipeline = Pipeline(base_config)
+
+            def fake_run_plan(*args, **kwargs):
+                pipeline.stages["metadata"].status = StageStatus.SUCCESS
+                pipeline.results["clips"] = []
+                pipeline._save_checkpoint()
+                return []
+
+            with patch.object(pipeline, "_run_plan", side_effect=fake_run_plan):
+                result = pipeline.run_until_clips_result(video_path)
+
+            with open(pipeline.checkpoint_file, encoding="utf-8") as f:
+                checkpoint = json.load(f)
+
+            assert result.success is True
+            assert checkpoint["video_path"] == video_path
+            assert checkpoint["fingerprints"] == compute_config_fingerprints(base_config)
+            assert checkpoint["temp_dir"] == tmpdir
+
+    @patch("src.pipeline.pipeline.temp_manager")
+    def test_run_until_clips_resumes_valid_checkpoint(self, mock_temp_mgr, base_config):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mock_temp_mgr.create_temp_dir.return_value = tmpdir
+            base_config["global"]["temp_dir"] = tmpdir
+
+            video_path = os.path.abspath(os.path.join(tmpdir, "same_name.mp4"))
+            frame_path = os.path.join(tmpdir, "frame_1000.jpg")
+            detection_path = os.path.join(tmpdir, "detections.json")
+            clip_path = os.path.join(tmpdir, "clip.mp4")
+            for path, contents in [
+                (frame_path, "frame"),
+                (detection_path, "[]"),
+                (clip_path, "clip"),
+            ]:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(contents)
+
+            path_hash = compute_path_hash(video_path)
+            checkpoint_file = os.path.join(tmpdir, f"checkpoint_same_name_{path_hash}.json")
+            checkpoint_data = {
+                "checkpoint_version": CHECKPOINT_VERSION,
+                "video_path": video_path,
+                "fingerprints": compute_config_fingerprints(base_config),
+                "stages": {
+                    "metadata": {"status": "SUCCESS", "duration": 0},
+                    "frames": {"status": "SUCCESS", "duration": 0},
+                    "detection": {"status": "SUCCESS", "duration": 0},
+                    "clips": {"status": "SUCCESS", "duration": 0},
+                },
+                "results": {
+                    "video_info": {"path": video_path, "duration": 1},
+                    "frames": [frame_path],
+                    "events": [],
+                    "detection_json": detection_path,
+                    "clips": [{"path": clip_path}],
+                },
+                "temp_dir": tmpdir,
+            }
+            with open(checkpoint_file, "w", encoding="utf-8") as f:
+                json.dump(checkpoint_data, f)
+
+            pipeline = Pipeline(base_config)
+
+            with patch("src.pipeline.pipeline.FrameExtractor") as mock_frame_extractor, \
+                 patch("src.pipeline.pipeline.run_detection_stage") as mock_detection_stage, \
+                 patch("src.pipeline.pipeline.ClipExtractor") as mock_clip_extractor:
+                result = pipeline.run_until_clips_result(video_path)
+
+            assert result.success is True
+            assert result.clips == [{"path": clip_path}]
+            mock_frame_extractor.assert_not_called()
+            mock_detection_stage.assert_not_called()
+            mock_clip_extractor.assert_not_called()

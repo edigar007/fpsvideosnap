@@ -2,7 +2,6 @@ import pytest
 import numpy as np
 import cv2
 import os
-import torch
 import json
 from unittest.mock import MagicMock
 from src.ai.model_manager import ModelManager
@@ -394,6 +393,74 @@ def test_kill_detector_uses_explicit_color_bounds_without_double_tolerance(mock_
     _, lower, upper = cv_matcher.detect_color.call_args.args[:3]
     assert lower == [0, 235, 235]
     assert upper == [10, 255, 255]
+
+def test_kill_detector_prefilter_enabled_false_skips_color_gate(mock_yolo_model):
+    frame = np.zeros((10, 10, 3), dtype=np.uint8)
+    game_config = {
+        'detection': {
+            'confidence_threshold': 0.5,
+            'killfeed_roi': [0, 0, 1, 1],
+            'colors': {
+                'sample_red': {
+                    'hsv_lower': [0, 235, 235],
+                    'hsv_upper': [10, 255, 255],
+                }
+            },
+            'prefilter': {
+                'enabled': False,
+                'color_threshold': 0.99,
+            },
+        }
+    }
+    yolo = YoloDetector(mock_yolo_model)
+    cv_matcher = MagicMock()
+    cv_matcher.templates = {}
+    cv_matcher.detect_color.return_value = 0.0
+
+    detector = KillDetector(yolo, cv_matcher, game_config)
+    detector._precise_detect = MagicMock(return_value={
+        "ocr": 0.0,
+        "template": 0.0,
+        "color": 1.0,
+        "yolo": 0.0,
+    })
+
+    result = detector.process_frame(frame)
+
+    detector._precise_detect.assert_called_once_with(frame, cached_color_pct=None)
+    cv_matcher.detect_color.assert_not_called()
+    assert result["signals"]["color"] == 1.0
+
+def test_kill_detector_passes_configured_ocr_similarity_threshold(mock_yolo_model):
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    yolo = YoloDetector(mock_yolo_model)
+    yolo.detect_single = MagicMock(return_value=[])
+    cv_matcher = MagicMock()
+    cv_matcher.templates = {}
+
+    ocr = MagicMock()
+    ocr.find_keywords.return_value = {"found": False, "confidence": 0.0}
+    game_config = {
+        'detection': {
+            'killfeed_roi': [0, 0, 1, 1],
+            'ocr': {
+                'enabled': True,
+                'keywords': ['KILL'],
+                'similarity_threshold': 0.95,
+            },
+            'colors': {},
+        }
+    }
+
+    detector = KillDetector(yolo, cv_matcher, game_config, ocr_detector=ocr)
+    detector._precise_detect(frame)
+
+    ocr.find_keywords.assert_called_once_with(
+        frame,
+        ['KILL'],
+        roi=[0, 0, 100, 100],
+        threshold=0.95,
+    )
 
 def test_timestamp_recorder_multiple_saves(tmp_path):
     """TASK-006: Verify TimestampRecorder handles multiple save operations correctly."""

@@ -1,0 +1,1 @@
+"""Config Assistant domain services."""

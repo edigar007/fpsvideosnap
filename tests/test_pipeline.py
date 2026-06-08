@@ -1,6 +1,5 @@
 import pytest
 import os
-import shutil
 from unittest.mock import MagicMock, patch
 from src.pipeline.pipeline import Pipeline, StageStatus
 
@@ -163,7 +162,7 @@ def test_pipeline_no_kills(mock_config):
     with patch("src.pipeline.pipeline.VideoInfo") as mock_video_info, \
          patch("src.pipeline.pipeline.FrameExtractor") as mock_frame_ext, \
          patch("src.pipeline.pipeline.KillDetector") as mock_kill_det, \
-         patch("src.pipeline.pipeline.ModelManager") as mock_model_mgr, \
+         patch("src.pipeline.pipeline.ModelManager"), \
          patch("src.pipeline.pipeline.create_progress_bar"), \
          patch("src.pipeline.pipeline.AudioMixer"), \
          patch("src.pipeline.pipeline.ReportGenerator") as mock_report, \
@@ -198,7 +197,7 @@ def test_pipeline_missing_clip_file(mock_config):
     with patch("src.pipeline.pipeline.VideoInfo") as mock_video_info, \
          patch("src.pipeline.pipeline.FrameExtractor") as mock_frame_ext, \
          patch("src.pipeline.pipeline.KillDetector") as mock_kill_det, \
-         patch("src.pipeline.pipeline.ModelManager") as mock_model_mgr, \
+         patch("src.pipeline.pipeline.ModelManager"), \
          patch("src.pipeline.pipeline.ClipExtractor") as mock_clip_ext, \
          patch("src.pipeline.pipeline.create_progress_bar"), \
          patch("cv2.imread"), \
@@ -243,7 +242,7 @@ def test_pipeline_missing_path_field(mock_config):
     with patch("src.pipeline.pipeline.VideoInfo") as mock_video_info, \
          patch("src.pipeline.pipeline.FrameExtractor") as mock_frame_ext, \
          patch("src.pipeline.pipeline.KillDetector") as mock_kill_det, \
-         patch("src.pipeline.pipeline.ModelManager") as mock_model_mgr, \
+         patch("src.pipeline.pipeline.ModelManager"), \
          patch("src.pipeline.pipeline.ClipExtractor") as mock_clip_ext, \
          patch("src.pipeline.pipeline.create_progress_bar"), \
          patch("cv2.imread"), \

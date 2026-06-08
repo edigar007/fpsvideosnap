@@ -1,8 +1,7 @@
 import os
 import cv2
 import numpy as np
-import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -19,7 +18,12 @@ class DetectionDebugger:
         self.roi = self.detection_cfg.get('killfeed_roi', [0, 0, 1, 1])
         self.conf_threshold = self.detection_cfg.get('confidence_threshold', 0.5)
 
-    def visualize_signals(self, frame: np.ndarray, results: Dict[str, Any], prefilter_passed: bool = True) -> np.ndarray:
+    def visualize_signals(
+        self,
+        frame: np.ndarray,
+        results: Dict[str, Any],
+        prefilter_passed: bool = True,
+    ) -> np.ndarray:
         """
         Draw ROI, signals, and confidence scores on the frame. (TASK-030, TASK-034)
         """
@@ -54,7 +58,16 @@ class DetectionDebugger:
         
         def draw_text(text, color=(255, 255, 255), scale=0.6, thickness=1):
             nonlocal y_offset
-            cv2.putText(debug_frame, text, (x_start, y_offset), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
+            cv2.putText(
+                debug_frame,
+                text,
+                (x_start, y_offset),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                scale,
+                color,
+                thickness,
+                cv2.LINE_AA,
+            )
             y_offset += 25
 
         # Signal Header

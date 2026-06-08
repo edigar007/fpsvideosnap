@@ -156,7 +156,8 @@ class OpenCVMatcher:
             else:
                 w = int(template_gray.shape[1] * scale)
                 h = int(template_gray.shape[0] * scale)
-                if w <= 0 or h <= 0: continue
+                if w <= 0 or h <= 0:
+                    continue
                 resized = cv2.resize(template_gray, (w, h))
 
             if resized.shape[0] > search_gray.shape[0] or resized.shape[1] > search_gray.shape[1]:
@@ -192,7 +193,8 @@ class OpenCVMatcher:
                 continue
             
             template_gray = self.templates_gray.get(name)
-            if template_gray is None: continue # Should not happen
+            if template_gray is None:
+                continue
 
             current_best_score = -1
             current_best_loc = None
@@ -203,7 +205,8 @@ class OpenCVMatcher:
                 else:
                     w = int(template_gray.shape[1] * scale)
                     h = int(template_gray.shape[0] * scale)
-                    if w <= 0 or h <= 0: continue
+                    if w <= 0 or h <= 0:
+                        continue
                     resized = cv2.resize(template_gray, (w, h))
 
                 if resized.shape[0] > search_gray.shape[0] or resized.shape[1] > search_gray.shape[1]:
@@ -219,7 +222,11 @@ class OpenCVMatcher:
             if current_best_score > best_result['score']:
                 best_result['score'] = current_best_score
                 best_result['name'] = name
-                best_result['location'] = (current_best_loc[0] + offset_x, current_best_loc[1] + offset_y) if current_best_loc else None
+                best_result['location'] = (
+                    (current_best_loc[0] + offset_x, current_best_loc[1] + offset_y)
+                    if current_best_loc
+                    else None
+                )
 
         if best_result['score'] < threshold:
             best_result['location'] = None
@@ -249,7 +256,8 @@ class OpenCVMatcher:
                 else:
                     w = int(template_gray.shape[1] * scale)
                     h = int(template_gray.shape[0] * scale)
-                    if w <= 0 or h <= 0: continue
+                    if w <= 0 or h <= 0:
+                        continue
                     resized = cv2.resize(template_gray, (w, h))
 
                 if resized.shape[0] > search_gray.shape[0] or resized.shape[1] > search_gray.shape[1]:

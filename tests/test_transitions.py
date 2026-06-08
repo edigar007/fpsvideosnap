@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import MagicMock, patch
 from src.video.transitions import TransitionManager
 from src.video.video_joiner import VideoJoiner
@@ -73,7 +72,11 @@ def test_video_joiner_pre_normalizes_clips_before_concat(mock_run):
     joiner = VideoJoiner(config)
     mock_run.return_value = MagicMock(returncode=0)
 
-    with patch.object(joiner, "_prepare_join_inputs", return_value=(["norm1.mp4", "norm2.mp4"], "temp/join_norm")) as mock_prepare:
+    with patch.object(
+        joiner,
+        "_prepare_join_inputs",
+        return_value=(["norm1.mp4", "norm2.mp4"], "temp/join_norm"),
+    ) as mock_prepare:
         success = joiner.join_clips(["c1.mp4", "c2.mp4"], "out.mp4")
 
     assert success
@@ -82,6 +85,36 @@ def test_video_joiner_pre_normalizes_clips_before_concat(mock_run):
     cmd_str = " ".join(cmd)
     assert "-i norm1.mp4" in cmd_str
     assert "-i norm2.mp4" in cmd_str
+
+
+@patch("subprocess.run")
+def test_video_joiner_forces_pre_normalize_when_clip_has_no_audio(mock_run):
+    config = {
+        "global": {"temp_dir": "temp"},
+        "video": {
+            "ffmpeg_path": "ffmpeg",
+            "join_fix": {
+                "pre_normalize_clips": False,
+            },
+        },
+        "highlights": {"transition_type": "none"},
+    }
+
+    joiner = VideoJoiner(config)
+    mock_run.return_value = MagicMock(returncode=0)
+
+    with (
+        patch.object(joiner, "_any_clip_missing_audio", return_value=True),
+        patch.object(
+            joiner,
+            "_prepare_join_inputs",
+            return_value=(["norm1.mp4", "norm2.mp4"], "temp/join_norm"),
+        ) as mock_prepare,
+    ):
+        success = joiner.join_clips(["c1.mp4", "c2.mp4"], "out.mp4")
+
+    assert success
+    mock_prepare.assert_called_once_with(["c1.mp4", "c2.mp4"])
 
 
 @patch("subprocess.run")
@@ -117,6 +150,37 @@ def test_video_joiner_normalize_command_uses_safe_intermediate_settings(mock_run
     assert "-movflags" in cmd and "+faststart" in cmd
     assert "-avoid_negative_ts" in cmd and "make_zero" in cmd
     assert "-max_interleave_delta" in cmd and "0" in cmd
+
+
+@patch("src.video.video_joiner.VideoInfo")
+@patch("subprocess.run")
+def test_video_joiner_normalize_adds_silent_track_for_no_audio(mock_run, mock_info):
+    config = {
+        "global": {"temp_dir": "temp"},
+        "video": {
+            "ffmpeg_path": "ffmpeg",
+            "fps": 60,
+            "join_fix": {
+                "safe_audio_rate": 48000,
+                "safe_channel_layout": "stereo",
+            },
+        },
+        "highlights": {"transition_type": "none"},
+    }
+    joiner = VideoJoiner(config)
+    mock_info.return_value.duration = 5.0
+    mock_run.return_value = MagicMock(returncode=0)
+
+    with patch.object(joiner, "_has_audio_stream", return_value=False):
+        output = joiner._normalize_clip_for_join("clip1.mp4", "temp/join_norm", 0)
+
+    assert output.endswith("join_norm_001.mp4")
+    cmd = mock_run.call_args[0][0]
+    cmd_str = " ".join(cmd)
+    assert "-f lavfi" in cmd_str
+    assert "-t 5.000" in cmd_str
+    assert "anullsrc=channel_layout=stereo:sample_rate=48000" in cmd_str
+    assert "[1:a]aformat=sample_rates=48000:channel_layouts=stereo" in cmd_str
 
 
 @patch("subprocess.run")

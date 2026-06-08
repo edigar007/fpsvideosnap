@@ -165,6 +165,70 @@ class TestConfigLoader(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_manual_override_deep_merges_detection_sections(self):
+        temp_dir = tempfile.mkdtemp()
+        try:
+            games_dir = os.path.join(temp_dir, "games")
+            os.makedirs(games_dir, exist_ok=True)
+
+            with open(os.path.join(temp_dir, "default_config.yaml"), "w", encoding="utf-8") as f:
+                yaml.dump({
+                    "detection": {
+                        "ocr": {
+                            "enabled": False,
+                            "keywords": ["DEFAULT"],
+                            "similarity_threshold": 0.8,
+                            "lang": "ch",
+                            "use_gpu": True,
+                        },
+                        "prefilter": {
+                            "enabled": True,
+                            "color_threshold": 0.01,
+                        },
+                        "weights": {
+                            "ocr": 0.4,
+                            "template": 0.3,
+                            "color": 0.2,
+                            "yolo": 0.1,
+                        },
+                    },
+                }, f)
+
+            override_path = os.path.join(temp_dir, "override.yaml")
+            with open(override_path, "w", encoding="utf-8") as f:
+                yaml.dump({
+                    "detection": {
+                        "ocr": {
+                            "enabled": True,
+                        },
+                        "prefilter": {
+                            "color_threshold": 0.05,
+                        },
+                    },
+                }, f)
+
+            config = ConfigLoader(config_dir=temp_dir).load_config(override_path=override_path)
+
+            self.assertEqual(config["detection"]["ocr"], {
+                "enabled": True,
+                "keywords": ["DEFAULT"],
+                "similarity_threshold": 0.8,
+                "lang": "ch",
+                "use_gpu": True,
+            })
+            self.assertEqual(config["detection"]["prefilter"], {
+                "enabled": True,
+                "color_threshold": 0.05,
+            })
+            self.assertEqual(config["detection"]["weights"], {
+                "ocr": 0.4,
+                "template": 0.3,
+                "color": 0.2,
+                "yolo": 0.1,
+            })
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     def test_invalid_game(self):
         with self.assertRaises(FileNotFoundError):
             self.loader.load_config(game_name="non_existent_game")

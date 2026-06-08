@@ -11,6 +11,7 @@ def loader() -> ConfigLoader:
 @pytest.fixture
 def valid_config() -> dict:
     return {
+        "config_version": 1,
         "video": {"frame_extraction_mode": "bulk"},
         "detection": {
             "killfeed_roi": [0.1, 0.2, 0.3, 0.4],
@@ -35,6 +36,12 @@ def valid_config() -> dict:
 
 def test_valid_config_passes(loader: ConfigLoader, valid_config: dict) -> None:
     loader._validate_config(valid_config)
+
+
+def test_config_version_must_be_supported(loader: ConfigLoader, valid_config: dict) -> None:
+    valid_config["config_version"] = 999
+    with pytest.raises(ValueError, match="config_version"):
+        loader._validate_config(valid_config)
 
 
 @pytest.mark.parametrize(

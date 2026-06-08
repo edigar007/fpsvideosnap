@@ -1,9 +1,4 @@
 import pytest
-import os
-import cv2
-import numpy as np
-from src.tools.config_assistant.api import api_bp
-from flask import Flask, jsonify
 
 def test_bbox_to_box_logic():
     # Mock data
@@ -47,8 +42,6 @@ def test_bbox_to_box_logic():
 
 def test_clamping_logic():
     # Bbox slightly outside ROI
-    img_w, img_h = 1000, 1000
-    roi = [0.1, 0.1, 0.1, 0.1] # ROI is [100, 100, 100, 100]
     roi_px = [100, 100, 100, 100]
     
     # Bbox is [50, 50, 100, 100] -> partially outside

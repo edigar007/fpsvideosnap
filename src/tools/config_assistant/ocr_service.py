@@ -1,6 +1,5 @@
 import os
 import cv2
-import numpy as np
 from typing import List, Dict, Optional
 from src.ai.ocr_detector import OCRDetector
 from src.utils.logger import get_logger

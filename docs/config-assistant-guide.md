@@ -55,6 +55,8 @@ python main.py config-assistant --port 8080
 
 ## 文件清理逻辑
 - 为保护隐私和节省空间，每次启动 `config-assistant` 时都会自动清理 `temp/uploads` 目录。
+- Config Assistant 是本机可信工具，默认只绑定 `127.0.0.1`。不要改为 `0.0.0.0` 暴露到局域网。
+- 上传参考图会保存到 `temp/uploads`，服务会清理文件名、限制保存路径留在上传目录内，并限制单个请求最大约 20 MB。
 - 退出程序（Ctrl+C）时也会触发自动清理逻辑。
 
 ---

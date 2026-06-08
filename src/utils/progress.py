@@ -14,7 +14,11 @@ def get_progress_bar():
         TimeRemainingColumn(),
     )
 
-def create_progress_bar(iterable: Optional[Iterable[Any]] = None, desc: str = "Processing", total: Optional[int] = None):
+def create_progress_bar(
+    iterable: Optional[Iterable[Any]] = None,
+    desc: str = "Processing",
+    total: Optional[int] = None,
+):
     """
     Creates a tqdm progress bar.
     If iterable is provided, it returns a tqdm object wrapping the iterable.

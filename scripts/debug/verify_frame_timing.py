@@ -103,14 +103,14 @@ def main():
         
         # 2. 从视频中精确提取该时间点的帧
         verify_frame = os.path.join(verify_dir, f"verify_{ts}.jpg")
-        print(f"  正在从视频提取验证帧...")
+        print("  正在从视频提取验证帧...")
         
         if not extract_frame_at_timestamp(video_path, ts, verify_frame):
-            print(f"  ✗ 无法从视频提取验证帧")
+            print("  ✗ 无法从视频提取验证帧")
             results.append((ts, False, "无法提取验证帧"))
             continue
         
-        print(f"  ✓ 验证帧已提取")
+        print("  ✓ 验证帧已提取")
         
         # 3. 比较两帧
         similarity, details = compare_frames(extracted_frame, verify_frame)
@@ -133,7 +133,7 @@ def main():
         
         # 如果不匹配，尝试前后几帧
         if similarity < 95:
-            print(f"\n  尝试前后偏移...")
+            print("\n  尝试前后偏移...")
             best_offset = 0
             best_similarity = similarity
             

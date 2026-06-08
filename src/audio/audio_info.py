@@ -9,8 +9,9 @@ class AudioInfo:
     
     SUPPORTED_FORMATS = {'.mp3', '.wav', '.m4a', '.flac', '.aac', '.ogg'}
 
-    def __init__(self, audio_path: str):
+    def __init__(self, audio_path: str, ffprobe_path: str = "ffprobe"):
         self.audio_path = os.path.abspath(audio_path)
+        self.ffprobe_path = ffprobe_path
         self.metadata: Optional[Dict[str, Any]] = None
         
         if not os.path.exists(self.audio_path):
@@ -24,12 +25,11 @@ class AudioInfo:
         _, ext = os.path.splitext(self.audio_path)
         if ext.lower() not in self.SUPPORTED_FORMATS:
             # We also check if it might be a video file containing audio
-            from src.video.video_info import VideoInfo
             try:
-                VideoInfo.SUPPORTED_FORMATS
+                from src.video.video_info import VideoInfo
                 if ext.lower() in VideoInfo.SUPPORTED_FORMATS:
                     return # Allow video files as audio sources
-            except:
+            except ImportError:
                 pass
             logger.warning(f"Audio format {ext} not in standard list, but attempting to probe.")
 
@@ -39,7 +39,7 @@ class AudioInfo:
             return self.metadata
             
         cmd = [
-            'ffprobe', 
+            self.ffprobe_path,
             '-v', 'quiet', 
             '-print_format', 'json', 
             '-show_format', 
@@ -70,7 +70,7 @@ class AudioInfo:
             
         except (subprocess.CalledProcessError, json.JSONDecodeError, ValueError) as e:
             logger.error(f"Failed to get audio metadata for {self.audio_path}: {e}")
-            raise RuntimeError(f"Could not probe audio file: {e}")
+            raise RuntimeError(f"Could not probe audio file: {e}") from e
 
     @property
     def duration(self) -> float:

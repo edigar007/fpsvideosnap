@@ -4,7 +4,6 @@ Custom logging handler that captures logs to a queue for SSE streaming.
 import logging
 import time
 from queue import Queue
-from typing import Optional
 
 
 class QueueLogHandler(logging.Handler):

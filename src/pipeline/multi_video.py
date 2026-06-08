@@ -1,0 +1,80 @@
+import os
+import shutil
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Type
+
+from src.audio.audio_mixer import AudioMixer
+from src.report.report_generator import ReportGenerator
+from src.utils.logger import get_logger
+from src.video.video_joiner import VideoJoiner
+
+logger = get_logger(__name__)
+
+
+def merge_clips_to_highlight(
+    config: Dict[str, Any],
+    source_videos: List[str],
+    clips: List[Dict[str, Any]],
+    timestamp: Optional[str] = None,
+    video_joiner_cls: Type[VideoJoiner] = VideoJoiner,
+    audio_mixer_cls: Type[AudioMixer] = AudioMixer,
+    report_generator_cls: Type[ReportGenerator] = ReportGenerator,
+) -> Optional[Dict[str, Any]]:
+    """
+    Merge clips from multiple videos into one final highlight and report.
+
+    Returns a result dict compatible with BatchProcessor's MERGED result, or
+    None when there are no valid clip paths or the join step fails.
+    """
+    clip_paths = [
+        clip.get("path") or clip.get("output_path")
+        for clip in clips
+        if clip.get("path") or clip.get("output_path")
+    ]
+    if not clip_paths:
+        logger.warning("[yellow]No clip paths available. Nothing to merge.[/yellow]")
+        return None
+
+    timestamp = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = config.get("global", {}).get("output_dir", "output")
+    os.makedirs(output_dir, exist_ok=True)
+
+    merged_no_audio = os.path.join(output_dir, f"combined_temp_{timestamp}.mp4")
+    final_output = os.path.join(output_dir, f"combined_highlights_{timestamp}.mp4")
+
+    joiner = video_joiner_cls(config)
+    if not joiner.join_clips(clip_paths, merged_no_audio):
+        logger.error("[red]Failed to merge clips.[/red]")
+        return None
+
+    mixer = audio_mixer_cls(config)
+    result_path = mixer.mix_audio(merged_no_audio, final_output)
+
+    if result_path == merged_no_audio:
+        shutil.copy2(merged_no_audio, final_output)
+
+    keep_intermediates = bool(config.get("global", {}).get("debug", False)) or bool(
+        config.get("video", {}).get("join_fix", {}).get("keep_intermediates", False)
+    )
+    if os.path.exists(merged_no_audio) and merged_no_audio != final_output and not keep_intermediates:
+        try:
+            os.remove(merged_no_audio)
+        except OSError as exc:
+            logger.warning(f"Failed to remove intermediate merged video {merged_no_audio}: {exc}")
+
+    report_gen = report_generator_cls(output_dir)
+    video_info = {
+        "path": f"Combined from {len(source_videos)} videos",
+        "source_videos": [os.path.basename(v) for v in source_videos],
+    }
+    report_path = report_gen.generate(video_info, clips, config)
+
+    return {
+        "path": "MERGED",
+        "success": True,
+        "final_video": final_output,
+        "total_clips": len(clips),
+        "source_videos": len(source_videos),
+        "report_path": report_path,
+    }
+

@@ -1,6 +1,4 @@
 import pytest
-import os
-import shutil
 import yaml
 from src.tools.config_assistant.config_manager import ConfigManager
 

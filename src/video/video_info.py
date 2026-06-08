@@ -9,8 +9,9 @@ class VideoInfo:
     
     SUPPORTED_FORMATS = {'.mp4', '.avi', '.mkv', '.mov'}
 
-    def __init__(self, video_path: str):
+    def __init__(self, video_path: str, ffprobe_path: str = "ffprobe"):
         self.video_path = os.path.abspath(video_path)
+        self.ffprobe_path = ffprobe_path
         self.metadata: Optional[Dict[str, Any]] = None
         
         if not os.path.exists(self.video_path):
@@ -31,7 +32,7 @@ class VideoInfo:
             return self.metadata
             
         cmd = [
-            'ffprobe', 
+            self.ffprobe_path,
             '-v', 'quiet', 
             '-print_format', 'json', 
             '-show_format', 
@@ -58,7 +59,11 @@ class VideoInfo:
                 'duration': float(format_info.get('duration', 0.0)),
                 'bitrate': int(format_info.get('bit_rate', 0)),
                 'codec': video_stream.get('codec_name', 'unknown'),
-                'total_frames': int(video_stream.get('nb_frames', 0)) if video_stream.get('nb_frames', 'N/A') != 'N/A' else None
+                'total_frames': (
+                    int(video_stream.get('nb_frames', 0))
+                    if video_stream.get('nb_frames', 'N/A') != 'N/A'
+                    else None
+                )
             }
             
             logger.debug(f"Video Metadata for {os.path.basename(self.video_path)}: {metadata}")
@@ -66,7 +71,7 @@ class VideoInfo:
             
         except subprocess.CalledProcessError as e:
             logger.error(f"FFprobe failed for {self.video_path}: {e.stderr}")
-            raise RuntimeError(f"Failed to extract video metadata: {e}")
+            raise RuntimeError(f"Failed to extract video metadata: {e}") from e
         except Exception as e:
             logger.error(f"Error parsing metadata: {e}")
             raise

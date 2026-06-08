@@ -13,10 +13,12 @@ class FrameExtractor:
         ffmpeg_path: str = "ffmpeg",
         hwaccel: Optional[str] = "cuda",
         mode: str = "bulk",
+        ffprobe_path: str = "ffprobe",
     ):
         self.ffmpeg_path = ffmpeg_path
         self.hwaccel = hwaccel
         self.mode = mode
+        self.ffprobe_path = ffprobe_path
 
     def _ffmpeg_base_cmd(self) -> List[str]:
         cmd = [self.ffmpeg_path]
@@ -83,7 +85,8 @@ class FrameExtractor:
         )
 
         logger.info(
-            f"Extracting frames (bulk) from {os.path.basename(video_path)} interval={interval_ms}ms via ffmpeg filter..."
+            f"Extracting frames (bulk) from {os.path.basename(video_path)} "
+            f"interval={interval_ms}ms via ffmpeg filter..."
         )
 
         # Parse showinfo lines from stderr
@@ -139,16 +142,16 @@ class FrameExtractor:
             if name.startswith("tmp_") and name.lower().endswith(".jpg"):
                 try:
                     os.remove(os.path.join(output_dir, name))
-                except Exception:
-                    pass
+                except OSError as exc:
+                    logger.debug(f"Failed to remove temporary frame {name}: {exc}")
 
         # Save mapping for debugging
         try:
             mapping_path = os.path.join(output_dir, "frames_mapping.json")
             with open(mapping_path, "w", encoding="utf-8") as f:
                 json.dump(mapping, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+        except OSError as exc:
+            logger.debug(f"Failed to save frame timestamp mapping: {exc}")
 
         logger.info(f"Bulk extracted {len(final_files)} frames")
         return final_files
@@ -189,7 +192,7 @@ class FrameExtractor:
         # 首先获取视频时长
         try:
             probe_cmd = [
-                "ffprobe",
+                self.ffprobe_path,
                 "-v", "error",
                 "-select_streams", "v:0",
                 "-show_entries", "stream=duration",
@@ -201,12 +204,15 @@ class FrameExtractor:
             logger.debug(f"Video duration: {duration_sec:.2f}s")
         except Exception as e:
             logger.error(f"Failed to get video duration: {e}")
-            raise RuntimeError("Cannot determine video duration")
+            raise RuntimeError("Cannot determine video duration") from e
         
         interval_sec = interval_ms / 1000.0
         total_frames = int(duration_sec / interval_sec) + 1
         
-        logger.info(f"Extracting {total_frames} frames from {os.path.basename(video_path)} with interval {interval_ms}ms...")
+        logger.info(
+            f"Extracting {total_frames} frames from {os.path.basename(video_path)} "
+            f"with interval {interval_ms}ms..."
+        )
         logger.info("Using precise timestamp extraction (may take longer but ensures accuracy)")
         
         final_files = []

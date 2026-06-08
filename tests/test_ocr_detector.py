@@ -1,8 +1,7 @@
 import pytest
 import numpy as np
 import cv2
-import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from src.ai.ocr_detector import OCRDetector
 
 @pytest.fixture

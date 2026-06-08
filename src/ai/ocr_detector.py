@@ -6,7 +6,7 @@ import atexit
 import importlib.util
 import uuid
 import threading
-from typing import List, Dict, Union, Optional
+from typing import List, Dict, Optional
 
 from src.utils.temp_manager import temp_manager
 from src.ai.paddleocr_subprocess import PaddleOCRSubprocess
@@ -45,8 +45,8 @@ if sys.platform == 'win32':
                     if hasattr(os, 'add_dll_directory'):
                         try:
                             os.add_dll_directory(nvidia_path)
-                        except Exception:
-                            pass
+                        except OSError as exc:
+                            print(f"[GPU] Warning: Failed to add DLL directory {nvidia_path}: {exc}")
 
                     os.environ['PATH'] = nvidia_path + os.pathsep + current_path
                     current_path = os.environ['PATH']
@@ -127,8 +127,8 @@ def _release_paddle_subprocess_worker() -> None:
     if worker:
         try:
             worker.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"Failed to close PaddleOCR subprocess worker: {exc}")
 
 
 def _close_paddle_subprocess_worker_at_exit() -> None:
@@ -143,8 +143,8 @@ def _close_paddle_subprocess_worker_at_exit() -> None:
     if worker:
         try:
             worker.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"Failed to close PaddleOCR subprocess worker at exit: {exc}")
 
 
 atexit.register(_close_paddle_subprocess_worker_at_exit)
@@ -233,7 +233,7 @@ class OCRDetector:
                 self.ocr_engine = easyocr.Reader(eocr_lang, gpu=self.use_gpu)
                 self.engine_type = 'easyocr'
                 logger.info(f"Initialized EasyOCR (lang={eocr_lang}, gpu={use_gpu})")
-            except Exception as e:
+            except Exception:
                 logger.exception("Failed to initialize EasyOCR")
 
         if not self.ocr_engine:
@@ -243,14 +243,14 @@ class OCRDetector:
         if getattr(self, 'engine_type', None) == 'paddle_subprocess':
             try:
                 _release_paddle_subprocess_worker()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"Failed to release PaddleOCR subprocess worker: {exc}")
 
     def __del__(self):
         try:
             self.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"Failed to close OCRDetector during cleanup: {exc}")
 
     def detect_text(self, image: np.ndarray, roi: Optional[List[int]] = None) -> List[Dict]:
         """
@@ -321,8 +321,8 @@ class OCRDetector:
                 finally:
                     try:
                         os.remove(image_path)
-                    except Exception:
-                        pass
+                    except OSError as exc:
+                        logger.debug(f"Failed to remove temporary OCR image {image_path}: {exc}")
             elif self.engine_type == 'easyocr':
                 # EasyOCR returns [[bbox, text, confidence], ...]
                 # bbox is [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
@@ -339,7 +339,13 @@ class OCRDetector:
             logger.error(f"OCR detection failed ({self.engine_type}): {e}")
             return []
 
-    def find_keywords(self, image: np.ndarray, keywords: List[str], roi: Optional[List[int]] = None, threshold: float = 0.8) -> Dict:
+    def find_keywords(
+        self,
+        image: np.ndarray,
+        keywords: List[str],
+        roi: Optional[List[int]] = None,
+        threshold: float = 0.8,
+    ) -> Dict:
         """
         Searches for specific keywords using fuzzy matching.
         

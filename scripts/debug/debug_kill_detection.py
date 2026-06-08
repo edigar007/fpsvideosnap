@@ -196,14 +196,14 @@ def debug_kill_detection(image_path: str, game_name: str = "battlefield6"):
         
         if res['found']:
             ocr_conf = res['confidence'] / 100.0 if res['confidence'] > 1.0 else res['confidence']
-            print(f"\n✅ OCR 匹配成功!")
+            print("\n✅ OCR 匹配成功!")
             print(f"   匹配关键词: {res['matched_keyword']}")
             print(f"   识别文本: {res['text']}")
             print(f"   OCR置信度: {res.get('ocr_confidence', 'N/A')}")
             print(f"   相似度: {res['similarity']:.2%}")
             print(f"   最终得分: {ocr_conf:.3f}")
         else:
-            print(f"\n❌ OCR 未找到关键词")
+            print("\n❌ OCR 未找到关键词")
             if ocr_required:
                 print("   → 由于 OCR 是必须的且未匹配，击杀检测失败")
                 return
@@ -260,7 +260,7 @@ def debug_kill_detection(image_path: str, game_name: str = "battlefield6"):
         print(f"\n✅ YOLO 检测到 {len(kill_detections)} 个击杀目标")
         print(f"   最高置信度: {max_yolo_conf:.3f}")
     else:
-        print(f"\n❌ YOLO 未检测到击杀目标")
+        print("\n❌ YOLO 未检测到击杀目标")
     
     # 8. 颜色检测 (精确)
     print_section("步骤 8: 颜色精确检测")
@@ -319,7 +319,7 @@ def debug_kill_detection(image_path: str, game_name: str = "battlefield6"):
         'yolo': 0.1
     })
     
-    print(f"\n配置的权重:")
+    print("\n配置的权重:")
     for name, weight in weights.items():
         print(f"   {name.upper()}: {weight}")
     
@@ -345,7 +345,7 @@ def debug_kill_detection(image_path: str, game_name: str = "battlefield6"):
     # 计算最终得分
     final_conf = 0.0
     if total_weight > 0:
-        print(f"\n加权计算:")
+        print("\n加权计算:")
         for name, weight in active_weights.items():
             contrib = signals[name] * (weight / total_weight)
             final_conf += contrib
@@ -365,9 +365,9 @@ def debug_kill_detection(image_path: str, game_name: str = "battlefield6"):
         print(f"✅ 判定为击杀! (置信度 {final_conf:.3f} >= 阈值 {conf_threshold})")
     else:
         print(f"❌ 未判定为击杀 (置信度 {final_conf:.3f} < 阈值 {conf_threshold})")
-        print(f"\n差距分析:")
+        print("\n差距分析:")
         print(f"   需要提高: {(conf_threshold - final_conf):.3f} 分")
-        print(f"\n可能的改进方向:")
+        print("\n可能的改进方向:")
         
         # 给出改进建议
         suggestions = []

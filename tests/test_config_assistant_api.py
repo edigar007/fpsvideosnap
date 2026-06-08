@@ -1,6 +1,5 @@
 import os
 import io
-import json
 import pytest
 import yaml
 from PIL import Image
@@ -57,6 +56,58 @@ def test_upload(client):
     assert res['height'] == 100
     assert 'url' in res
     assert 'path' in res
+    assert res['filename'] == 'test.png'
+
+
+def test_upload_sanitizes_path_traversal_filename(client):
+    img = Image.new('RGB', (12, 8), color='red')
+    img_byte_arr = io.BytesIO()
+    img.save(img_byte_arr, format='PNG')
+    img_byte_arr.seek(0)
+
+    rv = client.post(
+        '/api/upload',
+        data={'file': (img_byte_arr, '../x.png')},
+        content_type='multipart/form-data',
+    )
+
+    assert rv.status_code == 200
+    res = rv.get_json()
+    assert res['filename'] == 'x.png'
+    assert res['url'] == '/uploads/x.png'
+    assert os.path.dirname(os.path.abspath(res['path'])) == os.path.abspath(client.application.config['UPLOAD_FOLDER'])
+
+
+def test_upload_empty_filename_returns_400(client):
+    rv = client.post(
+        '/api/upload',
+        data={'file': (io.BytesIO(b''), '')},
+        content_type='multipart/form-data',
+    )
+
+    assert rv.status_code == 400
+
+
+def test_upload_disallowed_extension_returns_400(client):
+    rv = client.post(
+        '/api/upload',
+        data={'file': (io.BytesIO(b'text'), 'note.txt')},
+        content_type='multipart/form-data',
+    )
+
+    assert rv.status_code == 400
+
+
+def test_upload_over_size_limit_returns_413(client):
+    client.application.config["MAX_CONTENT_LENGTH"] = 16
+
+    rv = client.post(
+        '/api/upload',
+        data={'file': (io.BytesIO(b'x' * 64), 'too_large.png')},
+        content_type='multipart/form-data',
+    )
+
+    assert rv.status_code == 413
 
 def test_pick_color(client):
     # Prepare image
@@ -288,7 +339,7 @@ class TestRulesAPI:
         """Create a test game with config for rules testing."""
         game_name = "test_rules_game"
         # Create the game
-        rv = client.post('/api/game/create', json={"game_name": game_name})
+        client.post('/api/game/create', json={"game_name": game_name})
         # Ignore if already exists
         yield game_name
         # Cleanup

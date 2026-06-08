@@ -18,7 +18,7 @@ def main() -> int:
     from paddleocr import PaddleOCR
 
     print("Initializing PaddleOCR (gpu:0)...")
-    ocr = PaddleOCR(use_angle_cls=True, lang="ch", device="gpu:0")
+    PaddleOCR(use_angle_cls=True, lang="ch", device="gpu:0")
     print("PaddleOCR init: OK")
     return 0
 

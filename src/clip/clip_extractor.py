@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List, Dict, Optional
+from typing import List, Dict
 from src.utils.logger import get_logger
 from src.utils.progress import get_progress_bar
 from src.video.clip_cutter import ClipCutter
@@ -81,7 +81,6 @@ class ClipExtractor:
                 # Format metadata
                 start = clip["start"]
                 duration = clip["end"] - start
-                kill_count = clip["kill_count"]
                 kill_type = clip["kill_type"]
                 timestamp_str = f"{int(start)}s"
                 

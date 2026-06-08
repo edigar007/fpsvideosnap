@@ -1,6 +1,5 @@
-from typing import List, Union
+from typing import List
 import numpy as np
-import cv2
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

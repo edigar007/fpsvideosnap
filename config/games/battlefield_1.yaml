@@ -1,3 +1,4 @@
+config_version: 1
 game_name: battlefield_1
 detection:
   killfeed_roi:

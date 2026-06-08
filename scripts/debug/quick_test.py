@@ -36,7 +36,7 @@ if frame is not None:
     print("\n" + "="*60)
     print(f"检测结果: {'击杀 ✓' if result['is_kill'] else '非击杀 ✗'}")
     print(f"置信度: {result['confidence']:.3f}")
-    print(f"信号得分:")
+    print("信号得分:")
     for key, value in result.get('signals', {}).items():
         print(f"  {key}: {value:.3f}")
     print("="*60)

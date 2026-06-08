@@ -3,7 +3,6 @@ import sys
 import unittest
 import shutil
 import subprocess
-from unittest.mock import MagicMock, patch
 
 # Add project root to python path
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
@@ -12,7 +11,6 @@ from src.audio.audio_info import AudioInfo
 from src.audio.music_processor import MusicProcessor
 from src.audio.audio_mixer import AudioMixer
 from src.config.config_loader import ConfigLoader
-from src.utils.temp_manager import temp_manager
 
 
 class TestAudioProcessing(unittest.TestCase):

@@ -9,6 +9,7 @@ from src.tools.config_assistant.api import api_bp
 from src.utils.logger import get_logger, setup_logger
 
 logger = get_logger("config_assistant.server")
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 def create_app():
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +26,7 @@ def create_app():
         os.makedirs(upload_folder, exist_ok=True)
     
     app.config['UPLOAD_FOLDER'] = upload_folder
+    app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
     
     # Register blueprints
     app.register_blueprint(api_bp, url_prefix="/api")

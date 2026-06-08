@@ -2,7 +2,7 @@
 Performance profiler for tracking and analyzing processing time of each step.
 """
 import time
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from collections import defaultdict
 import json
 from src.utils.logger import get_logger
@@ -82,7 +82,12 @@ class PerformanceProfiler:
         output = print if use_print else logger.info
         
         output("\n" + "="*80)
-        output("[bold cyan]性能分析报告 (Performance Profile)[/bold cyan]" if not use_print else "性能分析报告 (Performance Profile)")
+        title = (
+            "性能分析报告 (Performance Profile)"
+            if use_print
+            else "[bold cyan]性能分析报告 (Performance Profile)[/bold cyan]"
+        )
+        output(title)
         output("="*80)
         
         all_stats = self.get_all_stats()

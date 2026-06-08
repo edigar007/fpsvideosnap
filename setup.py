@@ -1,9 +1,10 @@
-from setuptools import setup, find_packages
+from setuptools import find_namespace_packages, setup
 
 setup(
     name="fpsvideosnap",
     version="1.0.0",
-    packages=find_packages(),
+    packages=find_namespace_packages(include=["src", "src.*"]),
+    py_modules=["main"],
     install_requires=[
         "numpy",
         "opencv-python",

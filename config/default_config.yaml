@@ -1,4 +1,5 @@
 # FPS Video Snap Default Configuration
+config_version: 1
 
 # Global processing settings
 global:
@@ -49,6 +50,9 @@ video:
 # AI Detection settings
 ai:
   batch_size: 16
+  # Keep normal runs offline. Set true only during initial setup if you want
+  # Ultralytics to download a missing model automatically.
+  allow_model_download: false
 
 detection:
   model_path: "models/yolov8n.pt"

@@ -1,10 +1,8 @@
 import os
 import time
-import json
-from typing import Dict, List, Any, Optional
+from typing import Callable, Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
-from datetime import datetime
 
 from src.utils.logger import get_logger
 from src.utils.progress import create_progress_bar
@@ -21,20 +19,43 @@ from src.video.video_joiner import VideoJoiner
 from src.audio.audio_mixer import AudioMixer
 from src.report.report_generator import ReportGenerator
 from src.history.history_manager import HistoryManager
+from src.pipeline.checkpoint import CheckpointData, CheckpointStore
 from src.pipeline.context import PipelineContext
+from src.pipeline.post_run import emit_performance_profile
+from src.pipeline.results import (
+    CLIPS,
+    DEBUG_VIDEO,
+    DETECTION_JSON,
+    EVENTS,
+    FINAL_VIDEO,
+    FRAMES,
+    JOINED_VIDEO,
+    PipelineRunResult,
+    REPORT_PATH,
+    VIDEO_INFO,
+)
+from src.pipeline.stages.audio_stage import run_audio_stage
+from src.pipeline.stages.base import StageResult
+from src.pipeline.stages.cleanup_stage import run_cleanup_stage
 from src.pipeline.stages.detection_stage import run_detection_stage
+from src.pipeline.stages.history_stage import run_history_stage
+from src.pipeline.stages.join_stage import run_join_stage
+from src.pipeline.stages.report_stage import run_report_stage
+from src.pipeline.runner import PipelineRunner
+from src.pipeline.stage_registry import ArtifactStore, StageRegistry
 from src.config.fingerprint import (
     compute_config_fingerprints,
     compute_path_hash,
     get_earliest_invalidation_stage,
-    get_stages_to_invalidate,
-    get_unique_output_path,
 )
+from src.config.settings import AppSettings
 
 logger = get_logger(__name__)
 
 # Checkpoint format version for future compatibility
 CHECKPOINT_VERSION = 2
+FULL_PLAN = ["metadata", "frames", "detection", "clips", "join", "audio", "report", "history", "cleanup"]
+CLIPS_PLAN = ["metadata", "frames", "detection", "clips"]
 profiler = get_profiler()
 
 class StageStatus(Enum):
@@ -58,8 +79,12 @@ class Pipeline:
     Main orchestration class for the FPS Video Snap processing flow.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None):
         self.config = config
+        self.settings = AppSettings.from_config(config)
+        self.progress_callback = progress_callback
+        self.logger = logger
+        self.stage_status_cls = StageStatus
         self.stages: Dict[str, PipelineStage] = {}
         self.results: Dict[str, Any] = {}
         self.checkpoint_file = ""
@@ -68,19 +93,21 @@ class Pipeline:
         self._video_path: str = ""
         self._fingerprints: Dict[str, str] = {}
         self._loaded_fingerprints: Dict[str, str] = {}
+        self.stage_registry = StageRegistry()
         
         # Initialize stages
-        stage_names = [
-            "metadata", "frames", "detection", "clips", 
-            "join", "audio", "report", "history", "cleanup"
-        ]
-        for name in stage_names:
+        for name in self.stage_registry.stage_names:
             self.stages[name] = PipelineStage(name=name)
+        self.runner = PipelineRunner(self, CLIPS_PLAN)
 
         # Components
         self.temp_dir = temp_manager.create_temp_dir("pipeline_")
         self.video_info: Optional[VideoInfo] = None
-        self.model_manager = ModelManager(config.get("ai", {}).get("model_dir", "models"))
+        self.model_manager = ModelManager(
+            self.settings.detection.model_path,
+            allow_model_download=self.settings.ai.allow_model_download,
+        )
+        self.checkpoint_store = CheckpointStore(CHECKPOINT_VERSION)
 
     def _load_detection_templates(self, opencv_matcher: OpenCVMatcher) -> int:
         """
@@ -111,23 +138,14 @@ class Pipeline:
             self._save_checkpoint()
 
     def _save_checkpoint(self):
-        if not self.checkpoint_file:
-            return
-        
-        checkpoint_data = {
-            "checkpoint_version": CHECKPOINT_VERSION,
-            "video_path": self._video_path,
-            "fingerprints": self._fingerprints,
-            "stages": {name: {"status": s.status.value, "duration": s.duration} for name, s in self.stages.items()},
-            "results": self.results,
-            "temp_dir": self.temp_dir,
-            "timestamp": datetime.now().isoformat()
-        }
-        try:
-            with open(self.checkpoint_file, 'w', encoding='utf-8') as f:
-                json.dump(checkpoint_data, f, indent=4)
-        except Exception as e:
-            logger.error(f"Failed to save checkpoint: {e}")
+        self.checkpoint_store.save(
+            self.checkpoint_file,
+            self._video_path,
+            self._fingerprints,
+            self.stages,
+            self.results,
+            self.temp_dir,
+        )
 
     def _load_checkpoint(self, checkpoint_path: str, current_video_path: str) -> bool:
         """
@@ -136,43 +154,28 @@ class Pipeline:
         Returns True if checkpoint was loaded successfully and is valid for resume.
         Returns False if checkpoint doesn't exist, is invalid, or belongs to different video.
         """
-        if not os.path.exists(checkpoint_path):
+        checkpoint = self.checkpoint_store.load(checkpoint_path, current_video_path)
+        if checkpoint is None:
             return False
-            
-        try:
-            with open(checkpoint_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            # Check checkpoint version - old format without version should be treated as fresh run
-            checkpoint_version = data.get("checkpoint_version", 1)
-            if checkpoint_version < CHECKPOINT_VERSION:
-                logger.info(
-                    f"Checkpoint version mismatch (v{checkpoint_version} < v{CHECKPOINT_VERSION}), "
-                    "starting fresh run"
-                )
-                return False
-            
-            # Validate video_path matches - different video should not resume
-            saved_video_path = data.get("video_path", "")
-            if saved_video_path and saved_video_path != current_video_path:
-                logger.info("Checkpoint belongs to different video, starting fresh run")
-                return False
-                
-            # Load stages
-            for name, s_data in data.get("stages", {}).items():
-                if name in self.stages:
-                    self.stages[name].status = StageStatus(s_data["status"])
-                    self.stages[name].duration = s_data["duration"]
-            
-            self.results = data.get("results", {})
-            self.temp_dir = data.get("temp_dir", self.temp_dir)
-            self._loaded_fingerprints = data.get("fingerprints", {})
-            
-            logger.info(f"Resumed from checkpoint: {checkpoint_path}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to load checkpoint: {e}")
-            return False
+
+        self._apply_checkpoint(checkpoint)
+        invalid_stage = self.checkpoint_store.get_invalid_stage(checkpoint)
+        if invalid_stage:
+            logger.info(f"Checkpoint artifacts missing or invalid, invalidating from stage: {invalid_stage}")
+            self._invalidate_from_stage(invalid_stage)
+
+        logger.info(f"Resumed from checkpoint: {checkpoint_path}")
+        return True
+
+    def _apply_checkpoint(self, checkpoint: CheckpointData) -> None:
+        for name, s_data in checkpoint.stages.items():
+            if name in self.stages:
+                self.stages[name].status = StageStatus(s_data["status"])
+                self.stages[name].duration = s_data["duration"]
+
+        self.results = checkpoint.results
+        self.temp_dir = checkpoint.temp_dir or self.temp_dir
+        self._loaded_fingerprints = checkpoint.fingerprints
 
     def _invalidate_from_stage(self, from_stage: str):
         """
@@ -181,9 +184,7 @@ class Pipeline:
         This resets the stage status to PENDING, clears associated results,
         and removes old artifacts from disk so they will be re-generated.
         """
-        import shutil
-        
-        stages_to_invalidate = get_stages_to_invalidate(from_stage)
+        stages_to_invalidate = self.stage_registry.stages_to_invalidate(from_stage)
         
         for stage_name in stages_to_invalidate:
             if stage_name in self.stages:
@@ -192,42 +193,12 @@ class Pipeline:
                 self.stages[stage_name].error = None
                 logger.debug(f"Invalidated stage: {stage_name}")
         
-        # Clear results for invalidated stages
-        result_keys_to_clear = {
-            "frames": ["frames"],
-            "detection": ["events", "detection_json"],
-            "clips": ["clips"],
-            "join": ["joined_video"],
-            "audio": ["final_video"],
-            "report": ["report_path"],
-        }
+        for key in self.stage_registry.result_keys_to_clear(stages_to_invalidate):
+            if key in self.results:
+                del self.results[key]
+                logger.debug(f"Cleared result key: {key}")
         
-        for stage_name in stages_to_invalidate:
-            for key in result_keys_to_clear.get(stage_name, []):
-                if key in self.results:
-                    del self.results[key]
-                    logger.debug(f"Cleared result key: {key}")
-        
-        # Clean up artifact directories/files on disk
-        if self.temp_dir:
-            artifact_paths = {
-                "frames": os.path.join(self.temp_dir, "frames"),
-                "clips": os.path.join(self.temp_dir, "clips"),
-                "join": os.path.join(self.temp_dir, "joined_no_audio.mp4"),
-            }
-            
-            for stage_name in stages_to_invalidate:
-                path = artifact_paths.get(stage_name)
-                if path and os.path.exists(path):
-                    try:
-                        if os.path.isdir(path):
-                            shutil.rmtree(path)
-                            logger.debug(f"Removed artifact directory: {path}")
-                        else:
-                            os.remove(path)
-                            logger.debug(f"Removed artifact file: {path}")
-                    except Exception as e:
-                        logger.warning(f"Failed to remove artifact {path}: {e}")
+        ArtifactStore(self.temp_dir).remove_stage_artifacts(stages_to_invalidate)
 
     def _build_context(self, video_path: str, base_name: str) -> PipelineContext:
         return PipelineContext(
@@ -237,6 +208,57 @@ class Pipeline:
             temp_dir=self.temp_dir,
             checkpoint_file=self.checkpoint_file,
             results=self.results,
+            progress_callback=self.progress_callback,
+        )
+
+    def _prepare_run(self, video_path: str, checkpoint_path: str = None) -> Tuple[str, str, bool]:
+        video_path = os.path.abspath(video_path)
+        base_name = os.path.splitext(os.path.basename(video_path))[0]
+
+        self._video_path = video_path
+        self._fingerprints = compute_config_fingerprints(self.config)
+
+        checkpoint_dir = self.config.get("global", {}).get("temp_dir", "temp")
+        if not os.path.exists(checkpoint_dir):
+            os.makedirs(checkpoint_dir, exist_ok=True)
+
+        path_hash = compute_path_hash(video_path)
+        self.checkpoint_file = checkpoint_path or os.path.join(
+            checkpoint_dir, f"checkpoint_{base_name}_{path_hash}.json"
+        )
+
+        checkpoint_loaded = False
+        self._loaded_fingerprints = {}
+        if os.path.exists(self.checkpoint_file):
+            checkpoint_loaded = self._load_checkpoint(self.checkpoint_file, video_path)
+
+            if checkpoint_loaded and self._loaded_fingerprints:
+                invalidate_from = get_earliest_invalidation_stage(
+                    self._loaded_fingerprints, self._fingerprints
+                )
+                if invalidate_from:
+                    logger.info(f"Config changed, invalidating from stage: {invalidate_from}")
+                    self._invalidate_from_stage(invalidate_from)
+
+        return video_path, base_name, checkpoint_loaded
+
+    def _build_run_result(
+        self,
+        success: bool,
+        mode: str,
+        video_path: str,
+        error: Optional[str] = None,
+        failed_stage: Optional[str] = None,
+    ) -> PipelineRunResult:
+        return PipelineRunResult(
+            success=success,
+            mode=mode,
+            video_path=video_path,
+            clips=self.results.get(CLIPS, []),
+            final_video=self.results.get(FINAL_VIDEO),
+            report_path=self.results.get(REPORT_PATH),
+            failed_stage=failed_stage,
+            error=error,
         )
 
     def _stage_completed(self, stage_name: str, resume_completed: bool) -> bool:
@@ -247,8 +269,11 @@ class Pipeline:
             return
 
         self._update_stage("metadata", StageStatus.RUNNING)
-        self.video_info = VideoInfo(context.video_path)
-        self.results["video_info"] = {
+        self.video_info = VideoInfo(
+            context.video_path,
+            ffprobe_path=self.settings.video.ffprobe_path,
+        )
+        self.results[VIDEO_INFO] = {
             "path": context.video_path,
             "duration": self.video_info.duration,
             "resolution": f"{self.video_info.width}x{self.video_info.height}",
@@ -258,19 +283,20 @@ class Pipeline:
 
     def _run_frames_stage(self, context: PipelineContext, resume_completed: bool) -> List[str]:
         if self._stage_completed("frames", resume_completed):
-            return self.results.get("frames", [])
+            return self.results.get(FRAMES, [])
 
         frame_dir = os.path.join(self.temp_dir, "frames")
         self._update_stage("frames", StageStatus.RUNNING)
         profiler.start("stage_frame_extraction")
         extractor = FrameExtractor(
-            ffmpeg_path=self.config.get("video", {}).get("ffmpeg_path", "ffmpeg"),
-            hwaccel=self.config.get("video", {}).get("hwaccel", "cuda"),
-            mode=self.config.get("video", {}).get("frame_extraction_mode", "bulk"),
+            ffmpeg_path=self.settings.video.ffmpeg_path,
+            ffprobe_path=self.settings.video.ffprobe_path,
+            hwaccel=self.settings.video.hwaccel,
+            mode=self.settings.video.frame_extraction_mode,
         )
-        interval = self.config.get("video", {}).get("frame_interval_ms", 1000)
+        interval = self.settings.video.frame_interval_ms
         frames = extractor.extract_frames(context.video_path, frame_dir, interval_ms=interval)
-        self.results["frames"] = frames
+        self.results[FRAMES] = frames
         profiler.end("stage_frame_extraction")
         self._update_stage("frames", StageStatus.SUCCESS)
         return frames
@@ -283,7 +309,7 @@ class Pipeline:
         resume_completed: bool,
     ) -> List[Dict[str, Any]]:
         if self._stage_completed("detection", resume_completed):
-            return self.results.get("events", [])
+            return self.results.get(EVENTS, [])
 
         self._update_stage("detection", StageStatus.RUNNING)
         detection_result = run_detection_stage(
@@ -299,10 +325,10 @@ class Pipeline:
         )
 
         detected_events = detection_result.events
-        self.results["events"] = detected_events
-        self.results["detection_json"] = detection_result.detection_json_path
+        self.results[EVENTS] = detected_events
+        self.results[DETECTION_JSON] = detection_result.detection_json_path
         if detection_result.debug_video_path:
-            self.results["debug_video"] = detection_result.debug_video_path
+            self.results[DEBUG_VIDEO] = detection_result.debug_video_path
         self._update_stage("detection", StageStatus.SUCCESS)
         return detected_events
 
@@ -314,295 +340,201 @@ class Pipeline:
         resume_completed: bool,
     ) -> List[Dict[str, Any]]:
         if self._stage_completed("clips", resume_completed):
-            return self.results.get("clips", [])
+            return self.results.get(CLIPS, [])
 
         clip_dir = os.path.join(self.temp_dir, "clips")
         if not detected_events:
             logger.warning(no_events_message)
             self._update_stage("clips", StageStatus.SKIPPED)
-            self.results["clips"] = []
+            self.results[CLIPS] = []
             return []
 
         self._update_stage("clips", StageStatus.RUNNING)
         clip_extractor = ClipExtractor(self.config)
 
-        detection_json = self.results.get("detection_json")
+        detection_json = self.results.get(DETECTION_JSON)
         if detection_json and os.path.exists(detection_json):
             extracted_clips = clip_extractor.extract_from_json(context.video_path, detection_json, clip_dir)
         else:
             logger.warning("Detection JSON not found, falling back to in-memory events")
             extracted_clips = clip_extractor.extract_clips(context.video_path, detected_events, clip_dir)
 
-        self.results["clips"] = extracted_clips
+        self.results[CLIPS] = extracted_clips
         self._update_stage("clips", StageStatus.SUCCESS)
         return extracted_clips
 
-    def _run_to_stage(
+    def _run_stage_result(self, stage_name: str, func, *args, **kwargs) -> StageResult:
+        self._update_stage(stage_name, StageStatus.RUNNING)
+        try:
+            result = func(*args, **kwargs)
+        except Exception as exc:
+            self._update_stage(stage_name, StageStatus.FAILED, str(exc))
+            raise
+
+        self.results.update(result.values)
+        self._update_stage(stage_name, StageStatus.SKIPPED if result.skipped else StageStatus.SUCCESS)
+        return result
+
+    def _run_join_plan_stage(
         self,
         context: PipelineContext,
-        target_stage: str,
+        extracted_clips: List[Dict[str, Any]],
+        resume_completed: bool,
+    ) -> Optional[str]:
+        if self._stage_completed("join", resume_completed):
+            return self.results.get(JOINED_VIDEO)
+
+        result = self._run_stage_result(
+            "join",
+            run_join_stage,
+            context,
+            extracted_clips,
+            video_joiner_cls=VideoJoiner,
+        )
+        return result.values.get(JOINED_VIDEO)
+
+    def _base_final_video_path(self, context: PipelineContext) -> str:
+        output_dir = self.config.get("global", {}).get("output_dir", "output")
+        return os.path.join(output_dir, f"{context.base_name}_highlights.mp4")
+
+    def _run_audio_plan_stage(
+        self,
+        context: PipelineContext,
+        joined_video: Optional[str],
+        resume_completed: bool,
+    ) -> Optional[str]:
+        base_final_path = self._base_final_video_path(context)
+        if self._stage_completed("audio", resume_completed):
+            saved_final_path = self.results.get(FINAL_VIDEO)
+            if saved_final_path and os.path.exists(saved_final_path):
+                return saved_final_path
+            if os.path.exists(base_final_path):
+                self.results[FINAL_VIDEO] = base_final_path
+                return base_final_path
+
+        result = self._run_stage_result(
+            "audio",
+            run_audio_stage,
+            context,
+            joined_video,
+            audio_mixer_cls=AudioMixer,
+        )
+        return result.values.get(FINAL_VIDEO)
+
+    def _run_report_stage(self, context: PipelineContext) -> StageResult:
+        return self._run_stage_result(
+            "report",
+            run_report_stage,
+            context,
+            report_generator_cls=ReportGenerator,
+        )
+
+    def _run_history_stage(self, context: PipelineContext) -> StageResult:
+        return self._run_stage_result(
+            "history",
+            run_history_stage,
+            context,
+            history_manager_cls=HistoryManager,
+        )
+
+    def _run_cleanup_stage(self, context: PipelineContext) -> StageResult:
+        return self._run_stage_result("cleanup", run_cleanup_stage, context)
+
+    def _run_plan(
+        self,
+        context: PipelineContext,
+        plan: List[str],
         progress_desc: str,
         no_events_message: str,
-        resume_completed: bool = True,
+        resume_completed: bool,
     ) -> Any:
-        self._run_metadata_stage(context, resume_completed)
-        if target_stage == "metadata":
-            return self.results.get("video_info", {})
-
-        frames = self._run_frames_stage(context, resume_completed)
-        if target_stage == "frames":
-            return frames
-
-        detected_events = self._run_detection_stage(context, frames, progress_desc, resume_completed)
-        if target_stage == "detection":
-            return detected_events
-
-        extracted_clips = self._run_clips_stage(context, detected_events, no_events_message, resume_completed)
-        if target_stage == "clips":
-            return extracted_clips
-
-        raise ValueError(f"Unknown target stage: {target_stage}")
-
-    def run(self, video_path: str, checkpoint_path: str = None) -> bool:
-        """
-        Runs the full pipeline for a single video.
-        """
-        video_path = os.path.abspath(video_path)
-        base_name = os.path.splitext(os.path.basename(video_path))[0]
-        
-        # Store video path for checkpoint
-        self._video_path = video_path
-        
-        # Compute current config fingerprints
-        self._fingerprints = compute_config_fingerprints(self.config)
-        
-        # Ensure temp directory exists for checkpoints
-        checkpoint_dir = self.config.get("global", {}).get("temp_dir", "temp")
-        if not os.path.exists(checkpoint_dir):
-            os.makedirs(checkpoint_dir, exist_ok=True)
-        
-        # Include path hash in checkpoint filename to avoid conflicts with same-named videos
-        path_hash = compute_path_hash(video_path)
-        self.checkpoint_file = checkpoint_path or os.path.join(
-            checkpoint_dir, f"checkpoint_{base_name}_{path_hash}.json"
+        return self.runner.run_plan(
+            context,
+            plan,
+            progress_desc,
+            no_events_message,
+            resume_completed=resume_completed,
         )
-        
-        # Try to resume if checkpoint exists
-        checkpoint_loaded = False
-        if os.path.exists(self.checkpoint_file):
-            checkpoint_loaded = self._load_checkpoint(self.checkpoint_file, video_path)
-            
-            # If checkpoint loaded, check for config changes and invalidate if needed
-            if checkpoint_loaded and self._loaded_fingerprints:
-                invalidate_from = get_earliest_invalidation_stage(
-                    self._loaded_fingerprints, self._fingerprints
-                )
-                if invalidate_from:
-                    logger.info(f"Config changed, invalidating from stage: {invalidate_from}")
-                    self._invalidate_from_stage(invalidate_from)
+
+    def _mark_current_stage_failed(self, error: str) -> None:
+        failed_stage = self._get_current_stage()
+        if failed_stage in self.stages and self.stages[failed_stage].status == StageStatus.RUNNING:
+            self._update_stage(failed_stage, StageStatus.FAILED, error)
+
+    def run_full_result(self, video_path: str, checkpoint_path: str = None) -> PipelineRunResult:
+        """
+        Runs the full pipeline for a single video and returns a structured result.
+        """
+        video_path, base_name, _checkpoint_loaded = self._prepare_run(video_path, checkpoint_path)
 
         try:
             context = self._build_context(video_path, base_name)
-            extracted_clips = self._run_to_stage(
+            self._run_plan(
                 context,
-                target_stage="clips",
+                FULL_PLAN,
                 progress_desc="Detecting Kills",
                 no_events_message="No kills detected. Skipping clip extraction.",
                 resume_completed=True,
             )
 
-            # 5. Join Clips
-            joined_video = None
-            if self.stages["join"].status != StageStatus.SUCCESS:
-                if not extracted_clips:
-                    self._update_stage("join", StageStatus.SKIPPED)
-                else:
-                    self._update_stage("join", StageStatus.RUNNING)
-                    joined_video = os.path.join(self.temp_dir, "joined_no_audio.mp4")
-                    joiner = VideoJoiner(self.config)
-                    
-                    # TASK-002: Validate clip paths and handle missing files
-                    clip_paths = []
-                    for clip in extracted_clips:
-                        # Read 'path' field, fallback to 'output_path' for backward compatibility
-                        clip_path = clip.get("path") or clip.get("output_path")
-                        if not clip_path:
-                            logger.error(f"Clip {clip.get('id', 'unknown')} missing path field")
-                            raise RuntimeError("Clip metadata missing path field")
-                        
-                        if not os.path.exists(clip_path):
-                            logger.error(f"Clip file not found: {clip_path}")
-                            raise FileNotFoundError(f"Clip file not found: {clip_path}")
-                        
-                        clip_paths.append(clip_path)
-                    
-                    if joiner.join_clips(clip_paths, joined_video):
-                        self.results["joined_video"] = joined_video
-                        self._update_stage("join", StageStatus.SUCCESS)
-                    else:
-                        raise RuntimeError("Failed to join clips.")
-            else:
-                joined_video = self.results.get("joined_video")
-
-            # 6. Audio Mixing
-            final_video_name = f"{base_name}_highlights.mp4"
-            output_dir = self.config.get("global", {}).get("output_dir", "output")
-            if not os.path.exists(output_dir):
-                os.makedirs(output_dir, exist_ok=True)
-            base_final_path = os.path.join(output_dir, final_video_name)
-            
-            # Check if final_video exists - if not, we need to rebuild
-            final_video_exists = os.path.exists(base_final_path)
-            need_audio_mixing = (self.stages["audio"].status != StageStatus.SUCCESS) or not final_video_exists
-            
-            # Determine final output path: use unique path only when actually re-running audio
-            if need_audio_mixing and final_video_exists:
-                # Config changed or rebuild needed, but file exists -> use suffix _1, _2, etc.
-                final_video_path = get_unique_output_path(base_final_path)
-                logger.info(f"Output file exists, using unique path: {final_video_path}")
-            else:
-                final_video_path = base_final_path
-            
-            if need_audio_mixing:
-                # Chain fallback: if joined_video is missing, try to rebuild from earlier stages
-                if not joined_video or not os.path.exists(joined_video):
-                    # Check if we can rebuild join stage
-                    if extracted_clips:
-                        logger.info("Joined video missing, re-running join stage for chain fallback")
-                        self.stages["join"].status = StageStatus.PENDING
-                        # Re-run join
-                        self._update_stage("join", StageStatus.RUNNING)
-                        joined_video = os.path.join(self.temp_dir, "joined_no_audio.mp4")
-                        joiner = VideoJoiner(self.config)
-                        clip_paths = []
-                        for clip in extracted_clips:
-                            clip_path = clip.get("path") or clip.get("output_path")
-                            if clip_path and os.path.exists(clip_path):
-                                clip_paths.append(clip_path)
-                        
-                        if clip_paths and joiner.join_clips(clip_paths, joined_video):
-                            self.results["joined_video"] = joined_video
-                            self._update_stage("join", StageStatus.SUCCESS)
-                        else:
-                            logger.warning("Chain fallback failed: could not join clips")
-                            self._update_stage("audio", StageStatus.SKIPPED)
-                            joined_video = None
-                    else:
-                        logger.warning("Cannot rebuild: no clips available for chain fallback")
-                        self._update_stage("audio", StageStatus.SKIPPED)
-                        
-                if joined_video and os.path.exists(joined_video):
-                    self._update_stage("audio", StageStatus.RUNNING)
-                    mixer = AudioMixer(self.config)
-                    result_path = mixer.mix_audio(joined_video, final_video_path)
-                    # If mixer skipped (no music), it returns joined_video
-                    if result_path == joined_video:
-                        import shutil
-                        shutil.copy2(joined_video, final_video_path)
-                    
-                    self.results["final_video"] = final_video_path
-                    self._update_stage("audio", StageStatus.SUCCESS)
-            else:
-                # Resume from checkpoint, final_video already exists
-                self.results["final_video"] = final_video_path
-
-            # 7. Report Generation
-            if self.stages["report"].status != StageStatus.SUCCESS:
-                self._update_stage("report", StageStatus.RUNNING)
-                report_gen = ReportGenerator(output_dir)
-                report_path = report_gen.generate(
-                    self.results.get("video_info", {}),
-                    self.results.get("clips", []),
-                    self.config
-                )
-                self.results["report_path"] = report_path
-                self._update_stage("report", StageStatus.SUCCESS)
-
-            # 8. History
-            if self.stages["history"].status != StageStatus.SUCCESS:
-                self._update_stage("history", StageStatus.RUNNING)
-                history_dir = self.config.get("global", {}).get("history_dir", "history")
-                history_mgr = HistoryManager(history_dir)
-                history_mgr.save_run(self.config, self.results.get("clips", []))
-                self._update_stage("history", StageStatus.SUCCESS)
-
-            # 9. Cleanup
-            if self.stages["cleanup"].status != StageStatus.SUCCESS:
-                self._update_stage("cleanup", StageStatus.RUNNING)
-                keep_intermediates = bool(self.config.get("global", {}).get("debug", False)) or bool(
-                    self.config.get("video", {}).get("join_fix", {}).get("keep_intermediates", False)
-                )
-                if not keep_intermediates:
-                    temp_manager.clean_all()
-                if os.path.exists(self.checkpoint_file):
-                    try:
-                        os.remove(self.checkpoint_file)
-                    except FileNotFoundError:
-                        pass
-                self._update_stage("cleanup", StageStatus.SUCCESS)
-
-            # 10. 打印性能分析报告
-            profiler.print_summary()
-            
-            # 保存性能分析数据到文件
-            history_dir = self.config.get("global", {}).get("history_dir", "history")
-            run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            perf_file = os.path.join(history_dir, f"performance_{run_timestamp}.json")
-            try:
-                os.makedirs(history_dir, exist_ok=True)
-                profiler.save_to_file(perf_file)
-            except OSError as e:
-                logger.warning(f"Failed to save performance profile: {e}")
+            emit_performance_profile(self.config)
 
             logger.info(f"[bold green]Pipeline completed successfully for {video_path}[/bold green]")
-            return True
+            return self._build_run_result(True, "full", video_path)
 
         except Exception as e:
-            logger.error(f"Pipeline failed at stage {self._get_current_stage()}: {e}")
+            failed_stage = self._get_current_stage()
+            self._mark_current_stage_failed(str(e))
+            logger.error(f"Pipeline failed at stage {failed_stage}: {e}")
             import traceback
             logger.debug(traceback.format_exc())
             
-            # 即使失败也打印性能报告（帮助调试）
-            profiler.print_summary()
+            emit_performance_profile(self.config, save_to_history=False)
             
-            return False
+            return self._build_run_result(False, "full", video_path, error=str(e), failed_stage=failed_stage)
+
+    def run(self, video_path: str, checkpoint_path: str = None) -> bool:
+        """
+        Runs the full pipeline for a single video.
+        """
+        return self.run_full_result(video_path, checkpoint_path).success
+
+    def run_until_clips_result(self, video_path: str, checkpoint_path: str = None) -> PipelineRunResult:
+        """
+        Runs the pipeline only until clips extraction and returns a structured result.
+        """
+        video_path, base_name, _checkpoint_loaded = self._prepare_run(video_path, checkpoint_path)
+
+        try:
+            context = self._build_context(video_path, base_name)
+            extracted_clips = self._run_plan(
+                context,
+                CLIPS_PLAN,
+                progress_desc=f"Detecting [{base_name}]",
+                no_events_message=f"{base_name}: No kills detected. Skipping clip extraction.",
+                resume_completed=True,
+            )
+            
+            logger.info(f"[bold green]{base_name}:[/bold green] Extracted {len(extracted_clips)} clips")
+            return self._build_run_result(True, "clips", video_path)
+
+        except Exception as e:
+            failed_stage = self._get_current_stage()
+            self._mark_current_stage_failed(str(e))
+            logger.error(f"Pipeline failed for {video_path}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            return self._build_run_result(False, "clips", video_path, error=str(e), failed_stage=failed_stage)
 
     def run_until_clips(self, video_path: str) -> List[Dict[str, Any]]:
         """
         Runs the pipeline only until clips extraction (skips join/audio/report).
         Used for multi-video merge mode where clips are collected and joined later.
-        
+
         Returns:
             List of extracted clip metadata dicts with 'path' field.
         """
-        video_path = os.path.abspath(video_path)
-        base_name = os.path.splitext(os.path.basename(video_path))[0]
-        
-        # Ensure temp directory exists
-        checkpoint_dir = self.config.get("global", {}).get("temp_dir", "temp")
-        if not os.path.exists(checkpoint_dir):
-            os.makedirs(checkpoint_dir, exist_ok=True)
-        
-        self.checkpoint_file = os.path.join(checkpoint_dir, f"checkpoint_{base_name}.json")
-        
-        try:
-            context = self._build_context(video_path, base_name)
-            extracted_clips = self._run_to_stage(
-                context,
-                target_stage="clips",
-                progress_desc=f"Detecting [{base_name}]",
-                no_events_message=f"{base_name}: No kills detected. Skipping clip extraction.",
-                resume_completed=False,
-            )
-            
-            logger.info(f"[bold green]{base_name}:[/bold green] Extracted {len(extracted_clips)} clips")
-            return extracted_clips
-
-        except Exception as e:
-            logger.error(f"Pipeline failed for {video_path}: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
-            return []
+        return self.run_until_clips_result(video_path).clips
 
     def _get_current_stage(self) -> str:
         for name, stage in self.stages.items():

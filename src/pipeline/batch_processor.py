@@ -1,9 +1,9 @@
 import os
 import glob
 from typing import List, Dict, Any
-from datetime import datetime
 from src.utils.logger import get_logger
 from src.pipeline.pipeline import Pipeline
+from src.pipeline.multi_video import merge_clips_to_highlight
 from src.video.video_joiner import VideoJoiner
 from src.audio.audio_mixer import AudioMixer
 from src.report.report_generator import ReportGenerator
@@ -72,15 +72,18 @@ class BatchProcessor:
         logger.info(f"[bold blue]Processing single video: {video_path}[/bold blue]")
 
         pipeline = Pipeline(self.config)
-        success = pipeline.run(video_path)
+        run_result = pipeline.run_full_result(video_path)
 
         result = {
             "path": video_path,
-            "success": success,
+            "success": run_result.success,
             "summary": pipeline.get_summary(),
-            "final_video": pipeline.results.get("final_video"),
-            "clips_count": len(pipeline.results.get("clips", []))
+            "final_video": run_result.final_video,
+            "clips_count": len(run_result.clips),
         }
+        if run_result.error:
+            result["error"] = run_result.error
+            result["failed_stage"] = run_result.failed_stage
 
         logger.info(pipeline.get_summary())
         return [result]
@@ -95,18 +98,29 @@ class BatchProcessor:
         all_clips = []
 
         for i, video_path in enumerate(video_files):
-            logger.info(f"\n[bold cyan]({i+1}/{len(video_files)}) Extracting clips from: {os.path.basename(video_path)}[/bold cyan]")
+            logger.info(
+                f"\n[bold cyan]({i + 1}/{len(video_files)}) "
+                f"Extracting clips from: {os.path.basename(video_path)}[/bold cyan]"
+            )
 
             pipeline = Pipeline(self.config)
-            clips = pipeline.run_until_clips(video_path)
+            run_result = pipeline.run_until_clips_result(video_path)
+            clips = run_result.clips
 
             result = {
                 "path": video_path,
-                "success": len(clips) > 0 or pipeline.stages["clips"].status.value == "SKIPPED",
+                "success": run_result.success,
                 "clips_count": len(clips),
-                "clips": clips
+                "clips": clips,
             }
+            if run_result.error:
+                result["error"] = run_result.error
+                result["failed_stage"] = run_result.failed_stage
             results.append(result)
+
+            if not run_result.success:
+                logger.error(f"Skipping clips from failed video: {video_path}")
+                continue
 
             for clip in clips:
                 clip_path = clip.get("path") or clip.get("output_path")
@@ -120,57 +134,22 @@ class BatchProcessor:
             return results
 
         logger.info(f"\n[bold green]Merging {len(all_clips)} clips from {len(video_files)} videos...[/bold green]")
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = self.config.get("global", {}).get("output_dir", "output")
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir, exist_ok=True)
-
-        merged_no_audio = os.path.join(output_dir, f"combined_temp_{timestamp}.mp4")
-        final_output = os.path.join(output_dir, f"combined_highlights_{timestamp}.mp4")
-
-        joiner = VideoJoiner(self.config)
-        clip_paths = [c.get("path") or c.get("output_path") for c in all_clips]
-
-        if not joiner.join_clips(clip_paths, merged_no_audio):
-            logger.error("[red]Failed to merge clips.[/red]")
+        merged_result = merge_clips_to_highlight(
+            self.config,
+            video_files,
+            all_clips,
+            video_joiner_cls=VideoJoiner,
+            audio_mixer_cls=AudioMixer,
+            report_generator_cls=ReportGenerator,
+        )
+        if not merged_result:
             return results
 
-        mixer = AudioMixer(self.config)
-        result_path = mixer.mix_audio(merged_no_audio, final_output)
+        logger.info("\n[bold green]Multi-video merge complete![/bold green]")
+        logger.info(f"  Total clips: {merged_result['total_clips']}")
+        logger.info(f"  Output: [cyan]{merged_result['final_video']}[/cyan]")
+        logger.info(f"  Report: {merged_result['report_path']}")
 
-        if result_path == merged_no_audio:
-            import shutil
-            shutil.copy2(merged_no_audio, final_output)
-
-        keep_intermediates = bool(self.config.get("global", {}).get("debug", False)) or bool(
-            self.config.get("video", {}).get("join_fix", {}).get("keep_intermediates", False)
-        )
-        if os.path.exists(merged_no_audio) and merged_no_audio != final_output and not keep_intermediates:
-            try:
-                os.remove(merged_no_audio)
-            except Exception:
-                pass
-
-        report_gen = ReportGenerator(output_dir)
-        video_info = {
-            "path": f"Combined from {len(video_files)} videos",
-            "source_videos": [os.path.basename(v) for v in video_files]
-        }
-        report_path = report_gen.generate(video_info, all_clips, self.config)
-
-        logger.info(f"\n[bold green]Multi-video merge complete![/bold green]")
-        logger.info(f"  Total clips: {len(all_clips)}")
-        logger.info(f"  Output: [cyan]{final_output}[/cyan]")
-        logger.info(f"  Report: {report_path}")
-
-        results.append({
-            "path": "MERGED",
-            "success": True,
-            "final_video": final_output,
-            "total_clips": len(all_clips),
-            "source_videos": len(video_files),
-            "report_path": report_path
-        })
+        results.append(merged_result)
 
         return results

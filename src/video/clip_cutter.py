@@ -192,7 +192,7 @@ class ClipCutter:
             logger.debug(f"FFmpeg output: {result.stdout}")
         except subprocess.CalledProcessError as e:
             logger.error(f"FFmpeg cut failed: {e.stderr}")
-            raise RuntimeError(f"Failed to cut video segment: {e}")
+            raise RuntimeError(f"Failed to cut video segment: {e}") from e
     
     def _try_stream_copy(self, input_path: str, output_path: str, start_sec: float, duration_sec: float) -> bool:
         """
@@ -234,7 +234,7 @@ class ClipCutter:
         cmd.append(output_path)
         
         try:
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
             logger.debug("Stream copy successful")
             return True
         except subprocess.CalledProcessError as e:

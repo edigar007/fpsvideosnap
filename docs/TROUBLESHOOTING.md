@@ -105,3 +105,8 @@ Config Assistant will work without OCR - you just won't be able to preview OCR d
 1. 开启调试模式运行：`--debug`，查看 `temp/` 目录下的中间帧。
 2. 检查 `output/process_report.json` 获取详细处理流水。
 3. 在 GitHub 提交 Issue，附带你的系统配置、报错信息和 `default_config.yaml` 内容。
+# Local Web Tool Boundaries
+
+Config Assistant and Dashboard are intended for trusted local use only. Keep both servers bound to `127.0.0.1`; do not expose them with `0.0.0.0` on a LAN.
+
+Dashboard `/scan` lists video files from the directory path you provide. Use paths you trust, and expect it to read local directory metadata for matching video extensions.

@@ -1,7 +1,5 @@
-import os
 import pytest
 import yaml
-import json
 from src.tools.config_assistant.config_manager import ConfigManager
 from src.tools.config_assistant.api import api_bp
 from flask import Flask

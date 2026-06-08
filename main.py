@@ -22,7 +22,7 @@ if sys.platform == 'win32':
                                 os.environ['PATH'] = bin_path + os.pathsep + os.environ.get('PATH', '')
                         except Exception:
                             pass
-                print(f"[GPU] CUDA DLL directories configured for PaddleOCR GPU support")
+                print("[GPU] CUDA DLL directories configured for PaddleOCR GPU support")
                 break
     except Exception as e:
         print(f"[GPU] Warning: Could not configure CUDA paths: {e}")
@@ -54,6 +54,16 @@ def main():
         run_server(port=args.port, debug=args.debug)
         return
 
+    if args.command == "validate-config":
+        try:
+            config = get_config(game_name=args.game, override_path=args.config)
+            logger.info(f"Configuration valid for game: [yellow]{args.game}[/yellow]")
+            logger.debug(f"Validated Configuration: {config}")
+        except Exception as e:
+            logger.error(f"Configuration invalid: {e}")
+            raise SystemExit(1) from e
+        return
+
     # Default 'run' behavior
     logger.info("[bold blue]Starting FPS Video Snap Highlights Generator...[/bold blue]")
     
@@ -63,7 +73,7 @@ def main():
         logger.info(f"Loaded config for game: [yellow]{args.game}[/yellow]")
     except Exception as e:
         logger.error(f"Failed to load configuration: {e}")
-        return
+        raise SystemExit(1) from e
     
     # Override config with CLI arguments if provided
     if args.output:
@@ -87,23 +97,27 @@ def main():
         # Final Summary
         if not results:
             logger.warning("No videos were processed.")
-            return
+            raise SystemExit(1)
             
         # Check if multi-video merge was performed
         merged_result = next((r for r in results if r.get("path") == "MERGED"), None)
         
         if merged_result:
-            logger.info(f"\n[bold green]Multi-video merge complete![/bold green]")
+            logger.info("\n[bold green]Multi-video merge complete![/bold green]")
             logger.info(f"  Source videos: {merged_result.get('source_videos', 0)}")
             logger.info(f"  Total clips: {merged_result.get('total_clips', 0)}")
             logger.info(f"  Output: [cyan]{merged_result.get('final_video')}[/cyan]")
         else:
             success_count = sum(1 for r in results if r.get('success'))
-            logger.info(f"\n[bold green]Processing finished![/bold green]")
+            logger.info("\n[bold green]Processing finished![/bold green]")
             logger.info(f"Successfully processed: [green]{success_count}/{len(results)}[/green]")
+
+        if any(not r.get("success") for r in results):
+            raise SystemExit(1)
         
     except Exception as e:
         logger.exception(f"An unexpected error occurred during processing: {e}")
+        raise SystemExit(1) from e
 
 if __name__ == "__main__":
     main()

@@ -4,11 +4,14 @@ This is meant to validate the full OCR path with real game configs.
 On Windows, it also validates the Torch↔Paddle GPU DLL workaround by importing torch first.
 
 Usage examples (from repo root):
-  .venv\\Scripts\\python.exe scripts\\check_find_keywords_on_video_frame.py --video "G:\\Video\\...\\input.mp4" --game battlefield6 --timestamp-ms 123456
-  .venv\\Scripts\\python.exe scripts\\check_find_keywords_on_video_frame.py --video "..." --game battlefield6 --timestamp-ms 123456 --use-gpu
+  .venv\\Scripts\\python.exe scripts\\check_find_keywords_on_video_frame.py \
+    --video "G:\\Video\\...\\input.mp4" --game battlefield6 --timestamp-ms 123456
+  .venv\\Scripts\\python.exe scripts\\check_find_keywords_on_video_frame.py \
+    --video "..." --game battlefield6 --timestamp-ms 123456 --use-gpu
 
 Notes:
-  - If --use-gpu is set and torch is loaded, OCRDetector should auto-switch to subprocess PaddleOCR (requires .venv_paddle).
+  - If --use-gpu is set and torch is loaded, OCRDetector should auto-switch
+    to subprocess PaddleOCR (requires .venv_paddle).
 """
 
 import argparse
@@ -48,7 +51,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--frames-dir",
         default=None,
-        help="Optional directory containing pre-extracted frames named frame_{timestamp_ms}.jpg (e.g. temp/pipeline_xxx/frames).",
+        help=(
+            "Optional directory containing pre-extracted frames named "
+            "frame_{timestamp_ms}.jpg (e.g. temp/pipeline_xxx/frames)."
+        ),
     )
     p.add_argument(
         "--checkpoint",

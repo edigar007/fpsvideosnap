@@ -52,8 +52,5 @@ class TempManager:
                     logger.error(f"Failed to clean up {path}: {e}")
         self.tracked_paths = []
 
-    def __del__(self):
-        pass
-
 # Global instance for easy access
 temp_manager = TempManager()

@@ -1,5 +1,4 @@
 import subprocess
-import sys
 from pathlib import Path
 
 
@@ -12,8 +11,14 @@ def run(code: str) -> tuple[int, str]:
 
 def main() -> int:
     cases = {
-        "torch_then_paddle": "import torch; print('torch ok', torch.__version__); import paddle; print('paddle ok', paddle.__version__)",
-        "paddle_then_torch": "import paddle; print('paddle ok', paddle.__version__); import torch; print('torch ok', torch.__version__)",
+        "torch_then_paddle": (
+            "import torch; print('torch ok', torch.__version__); "
+            "import paddle; print('paddle ok', paddle.__version__)"
+        ),
+        "paddle_then_torch": (
+            "import paddle; print('paddle ok', paddle.__version__); "
+            "import torch; print('torch ok', torch.__version__)"
+        ),
     }
 
     for name, code in cases.items():

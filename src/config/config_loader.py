@@ -2,6 +2,8 @@ import os
 import yaml
 from typing import Any, Dict
 
+from src.config.validation import validate_config
+
 class ConfigLoader:
     DETECTION_REPLACE_PATHS = {
         "detection.ocr",
@@ -26,7 +28,7 @@ class ConfigLoader:
             game_config_path = os.path.join(self.games_config_dir, f"{game_name}.yaml")
             if os.path.exists(game_config_path):
                 game_config = self._load_yaml(game_config_path)
-                self._deep_merge(config, game_config)
+                self._deep_merge(config, game_config, replace_paths=self.DETECTION_REPLACE_PATHS)
             else:
                 raise FileNotFoundError(f"Game configuration for '{game_name}' not found at {game_config_path}")
                 
@@ -43,150 +45,7 @@ class ConfigLoader:
 
     def _validate_config(self, config: Dict[str, Any]):
         """Validates critical configuration fields."""
-        video = config.get('video', {})
-        frame_extraction_mode = video.get('frame_extraction_mode')
-        if frame_extraction_mode is not None and frame_extraction_mode not in {'bulk', 'precise'}:
-            raise ValueError("video.frame_extraction_mode must be 'bulk' or 'precise'")
-
-        highlights = config.get('highlights', {})
-        for key in ('pre_kill_time', 'post_kill_time'):
-            if key in highlights and (
-                not isinstance(highlights[key], (int, float)) or highlights[key] < 0
-            ):
-                raise ValueError(f"highlights.{key} must be a non-negative number")
-
-        for key in ('game_volume', 'music_volume'):
-            if key in highlights and (
-                not isinstance(highlights[key], (int, float)) or not 0 <= highlights[key] <= 1
-            ):
-                raise ValueError(f"highlights.{key} must be between 0 and 1")
-
-        if 'detection' not in config:
-            return
-            
-        det = config['detection']
-
-        if 'killfeed_roi' in det:
-            self._validate_roi(det['killfeed_roi'], 'detection.killfeed_roi')
-
-        if 'templates' in det and isinstance(det['templates'], dict):
-            for name, template_cfg in det['templates'].items():
-                if isinstance(template_cfg, dict) and 'roi' in template_cfg:
-                    self._validate_roi(template_cfg['roi'], f"detection.templates.{name}.roi")
-
-        if 'colors' in det and isinstance(det['colors'], dict):
-            for name, color_cfg in det['colors'].items():
-                if not isinstance(color_cfg, dict):
-                    raise ValueError(f"detection.colors.{name} must be a dict")
-                for key in ('hsv_lower', 'hsv_upper'):
-                    if key in color_cfg:
-                        self._validate_hsv(color_cfg[key], f"detection.colors.{name}.{key}")
-        
-        # Validate OCR settings
-        if 'ocr' in det:
-            ocr = det['ocr']
-            if not isinstance(ocr.get('enabled'), bool):
-                raise ValueError("detection.ocr.enabled must be a boolean")
-            if not isinstance(ocr.get('keywords'), list):
-                raise ValueError("detection.ocr.keywords must be a list")
-            if not (0 <= ocr.get('similarity_threshold', 0) <= 1):
-                raise ValueError("detection.ocr.similarity_threshold must be between 0 and 1")
-
-        # Validate Weights (must sum to approx 1.0 or just be positive)
-        if 'weights' in det:
-            weights = det['weights']
-            positive_count = 0
-            for k, v in weights.items():
-                if not isinstance(v, (int, float)) or v < 0:
-                    raise ValueError(f"Weight for {k} must be a non-negative number")
-                if v > 0:
-                    positive_count += 1
-            if weights and positive_count == 0:
-                raise ValueError("detection.weights must contain at least one positive value")
-                    
-        # Validate Prefilter
-        if 'prefilter' in det:
-            pre = det['prefilter']
-            if 'color_threshold' in pre and not (0 <= pre['color_threshold'] <= 1):
-                raise ValueError("detection.prefilter.color_threshold must be between 0 and 1")
-
-        # Validate Rules (OR-of-AND kill detection rules)
-        if 'rules' in det:
-            rules = det['rules']
-            
-            # Rules must be a list
-            if not isinstance(rules, list):
-                raise ValueError("detection.rules must be a list")
-            
-            # Allowed signal names
-            allowed_signals = {'ocr', 'template', 'color', 'yolo'}
-            
-            # Track names for uniqueness check
-            seen_names = set()
-            
-            for i, rule in enumerate(rules):
-                prefix = f"detection.rules[{i}]"
-                
-                # Each rule must be a dict
-                if not isinstance(rule, dict):
-                    raise ValueError(f"{prefix} must be a dict")
-                
-                # Validate name (required, non-empty string)
-                name = rule.get('name')
-                if not isinstance(name, str) or not name.strip():
-                    raise ValueError(f"{prefix}.name must be a non-empty string")
-                
-                # Check name uniqueness
-                if name in seen_names:
-                    raise ValueError(f"detection.rules: duplicate name '{name}'")
-                seen_names.add(name)
-                
-                # Validate enabled (must be bool)
-                enabled = rule.get('enabled')
-                if not isinstance(enabled, bool):
-                    raise ValueError(f"{prefix}.enabled must be a boolean")
-                
-                # Validate require (must be non-empty list of valid signals)
-                require = rule.get('require')
-                if not isinstance(require, list):
-                    raise ValueError(f"{prefix}.require must be a list")
-                
-                if len(require) == 0:
-                    raise ValueError(f"{prefix}.require must not be empty")
-                
-                for j, signal in enumerate(require):
-                    if not isinstance(signal, str) or signal not in allowed_signals:
-                        raise ValueError(
-                            f"{prefix}.require[{j}] '{signal}' is not a valid signal. "
-                            f"Allowed: {', '.join(sorted(allowed_signals))}"
-                        )
-
-                overrides = rule.get('detection_overrides', {})
-                if overrides:
-                    if not isinstance(overrides, dict):
-                        raise ValueError(f"{prefix}.detection_overrides must be a dict")
-                    if 'killfeed_roi' in overrides:
-                        self._validate_roi(overrides['killfeed_roi'], f"{prefix}.detection_overrides.killfeed_roi")
-                    if 'ocr' in overrides:
-                        ocr_override = overrides['ocr']
-                        if not isinstance(ocr_override, dict):
-                            raise ValueError(f"{prefix}.detection_overrides.ocr must be a dict")
-                        threshold = ocr_override.get('similarity_threshold')
-                        if threshold is not None and not 0 <= threshold <= 1:
-                            raise ValueError(
-                                f"{prefix}.detection_overrides.ocr.similarity_threshold "
-                                "must be between 0 and 1"
-                            )
-                    if 'colors' in overrides and isinstance(overrides['colors'], dict):
-                        for color_name, color_cfg in overrides['colors'].items():
-                            if not isinstance(color_cfg, dict):
-                                raise ValueError(f"{prefix}.detection_overrides.colors.{color_name} must be a dict")
-                            for key in ('hsv_lower', 'hsv_upper'):
-                                if key in color_cfg:
-                                    self._validate_hsv(
-                                        color_cfg[key],
-                                        f"{prefix}.detection_overrides.colors.{color_name}.{key}",
-                                    )
+        validate_config(config)
 
     def _validate_roi(self, roi: Any, field_name: str):
         if (
@@ -222,15 +81,22 @@ class ConfigLoader:
         with open(path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f) or {}
 
-    def _deep_merge(self, base: Dict[str, Any], update: Dict[str, Any], path: str = ""):
+    def _deep_merge(
+        self,
+        base: Dict[str, Any],
+        update: Dict[str, Any],
+        path: str = "",
+        replace_paths: set[str] = None,
+    ):
+        replace_paths = replace_paths or set()
         for key, value in update.items():
             current_path = f"{path}.{key}" if path else key
-            if current_path in self.DETECTION_REPLACE_PATHS:
+            if current_path in replace_paths:
                 base[key] = value
                 continue
 
             if isinstance(value, dict) and key in base and isinstance(base[key], dict):
-                self._deep_merge(base[key], value, current_path)
+                self._deep_merge(base[key], value, current_path, replace_paths=replace_paths)
             else:
                 base[key] = value
 

@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from src.ai.kill_detector import KillDetector
 
 @pytest.fixture
@@ -86,7 +86,7 @@ def test_rule_with_ocr_keywords_override(mock_detectors):
     detector = KillDetector(yolo, cv, config, ocr_detector=ocr)
     frame = np.zeros((100, 100, 3), dtype=np.uint8)
     
-    def mock_find_keywords(f, keywords, roi):
+    def mock_find_keywords(f, keywords, roi, threshold=0.8):
         if "Override" in keywords:
             return {"found": True, "confidence": 100.0}
         return {"found": False, "confidence": 0.0}
@@ -124,7 +124,7 @@ def test_multiple_rules_independent_evaluation(mock_detectors):
     frame = np.zeros((100, 100, 3), dtype=np.uint8)
     
     # Only K2 matches
-    def mock_find_keywords(f, keywords, roi):
+    def mock_find_keywords(f, keywords, roi, threshold=0.8):
         if "K2" in keywords:
             return {"found": True, "confidence": 100.0}
         return {"found": False, "confidence": 0.0}
@@ -135,7 +135,9 @@ def test_multiple_rules_independent_evaluation(mock_detectors):
     assert result["is_kill"] is True
     
     # If both fail
-    ocr.find_keywords.side_effect = lambda f, k, roi=None: {"found": False, "confidence": 0.0}
+    ocr.find_keywords.side_effect = (
+        lambda f, k, roi=None, threshold=0.8: {"found": False, "confidence": 0.0}
+    )
     result = detector.process_frame(frame)
     assert result["is_kill"] is False
 

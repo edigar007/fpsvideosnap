@@ -2,10 +2,8 @@
 Flask API endpoints for the Dashboard.
 """
 import os
-import json
-import time
-from flask import Blueprint, request, jsonify, Response
-from src.tools.dashboard.task_manager import task_manager, TaskStatus
+from flask import Blueprint, request, jsonify
+from src.tools.dashboard.task_manager import task_manager
 from src.utils.logger import get_logger
 
 logger = get_logger("dashboard.api")

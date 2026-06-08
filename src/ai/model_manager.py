@@ -10,8 +10,9 @@ class ModelManager:
     Manages the lifecycle of AI models, specifically YOLOv8.
     Handles device selection (CUDA/CPU) and model loading.
     """
-    def __init__(self, model_path="models/yolov8n.pt"):
+    def __init__(self, model_path="models/yolov8n.pt", allow_model_download: bool = False):
         self.model_path = model_path
+        self.allow_model_download = allow_model_download
         self._device = self._get_optimal_device()
         self.model = None
         
@@ -30,12 +31,21 @@ class ModelManager:
     def load_model(self):
         """
         Loads the YOLOv8 model from the specified path.
-        If the model file doesn't exist, YOLO will automatically download it.
+        Missing models fail by default to keep normal runs offline. Set
+        allow_model_download=True during setup to permit Ultralytics downloads.
         """
         try:
             logger.info(f"Loading YOLOv8 model from {self.model_path} on {self._device}...")
+            if not os.path.exists(self.model_path) and not self.allow_model_download:
+                raise FileNotFoundError(
+                    f"YOLO model not found: {self.model_path}. "
+                    "Place the model file locally or set ai.allow_model_download=true for initial setup."
+                )
+
             # Ensure the directory exists
-            os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
+            model_dir = os.path.dirname(self.model_path)
+            if model_dir:
+                os.makedirs(model_dir, exist_ok=True)
             
             self.model = YOLO(self.model_path)
             self.model.to(self._device)

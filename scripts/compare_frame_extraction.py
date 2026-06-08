@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 
 import cv2
@@ -29,8 +30,6 @@ import numpy as np
 
 # Ensure repo-root imports (consistent with main.py behavior)
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-import sys
-
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
@@ -76,7 +75,6 @@ def _side_by_side(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 def main() -> int:
     args = _parse_args()
 
-    repo_root = Path(__file__).resolve().parents[1]
     old_dir = _infer_old_frames_dir(args.checkpoint)
 
     out_dir = Path(args.out_dir)
@@ -158,7 +156,12 @@ def main() -> int:
 
     results.sort(key=lambda x: x[2], reverse=True)
     maes = [r[2] for r in results]
-    print(f"compared={len(results)} mae_avg={float(np.mean(maes)):.3f} mae_p95={float(np.percentile(maes,95)):.3f} mae_max={maes[0]:.3f}")
+    print(
+        f"compared={len(results)} "
+        f"mae_avg={float(np.mean(maes)):.3f} "
+        f"mae_p95={float(np.percentile(maes, 95)):.3f} "
+        f"mae_max={maes[0]:.3f}"
+    )
 
     for ts, new_ts, mae, old_path, new_path in results[: args.max_previews]:
         print({"old_ts": ts, "new_ts": new_ts, "mae": mae, "old": str(old_path), "new": str(new_path)})
