@@ -41,7 +41,7 @@ from src.pipeline.stages.detection_stage import run_detection_stage
 from src.pipeline.stages.history_stage import run_history_stage
 from src.pipeline.stages.join_stage import run_join_stage
 from src.pipeline.stages.report_stage import run_report_stage
-from src.pipeline.runner import PipelineRunner
+from src.pipeline.runner import PipelineRunner, PipelineStageContract
 from src.pipeline.stage_registry import ArtifactStore, StageRegistry
 from src.config.fingerprint import (
     compute_config_fingerprints,
@@ -98,7 +98,7 @@ class Pipeline:
         # Initialize stages
         for name in self.stage_registry.stage_names:
             self.stages[name] = PipelineStage(name=name)
-        self.runner = PipelineRunner(self, CLIPS_PLAN)
+        self.runner = PipelineRunner(self._build_stage_contract(), CLIPS_PLAN)
 
         # Components
         self.temp_dir = temp_manager.create_temp_dir("pipeline_")
@@ -108,6 +108,23 @@ class Pipeline:
             allow_model_download=self.settings.ai.allow_model_download,
         )
         self.checkpoint_store = CheckpointStore(CHECKPOINT_VERSION)
+
+    def _build_stage_contract(self) -> PipelineStageContract:
+        return PipelineStageContract(
+            results=self.results,
+            logger=self.logger,
+            stage_completed=self._stage_completed,
+            mark_stage_pending=self._mark_stage_pending,
+            run_metadata=self._run_metadata_stage,
+            run_frames=self._run_frames_stage,
+            run_detection=self._run_detection_stage,
+            run_clips=self._run_clips_stage,
+            run_join=self._run_join_plan_stage,
+            run_audio=self._run_audio_plan_stage,
+            run_report=self._run_report_stage,
+            run_history=self._run_history_stage,
+            run_cleanup=self._run_cleanup_stage,
+        )
 
     def _load_detection_templates(self, opencv_matcher: OpenCVMatcher) -> int:
         """
@@ -263,6 +280,9 @@ class Pipeline:
 
     def _stage_completed(self, stage_name: str, resume_completed: bool) -> bool:
         return resume_completed and self.stages[stage_name].status == StageStatus.SUCCESS
+
+    def _mark_stage_pending(self, stage_name: str) -> None:
+        self.stages[stage_name].status = StageStatus.PENDING
 
     def _run_metadata_stage(self, context: PipelineContext, resume_completed: bool) -> None:
         if self._stage_completed("metadata", resume_completed):

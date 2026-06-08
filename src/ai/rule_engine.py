@@ -3,6 +3,7 @@ from typing import Any, Callable, Dict, Optional
 
 from src.ai.rule_evaluator import RuleEvaluator
 from src.ai.signal_evaluator import signals_to_booleans
+from src.config.detection_view import DetectionConfigView
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -20,9 +21,14 @@ class DetectionRuleEngine:
         "_force_color_recompute",
     }
 
-    def __init__(self, detection_config: Dict[str, Any], templates_loaded: Callable[[], bool]):
-        self.detection_config = detection_config
-        self.rules = detection_config.get("rules", [])
+    def __init__(self, detection_config: Dict[str, Any] | DetectionConfigView, templates_loaded: Callable[[], bool]):
+        self.detection_view = (
+            detection_config
+            if isinstance(detection_config, DetectionConfigView)
+            else DetectionConfigView.from_config(detection_config)
+        )
+        self.detection_config = dict(self.detection_view.raw)
+        self.rules = self.detection_view.rule_dicts
         self.templates_loaded = templates_loaded
         self._config_cache: Dict[tuple, Dict[str, Any]] = {}
 
@@ -86,7 +92,7 @@ class DetectionRuleEngine:
         if not self.rules:
             return None
 
-        enabled_rules = [rule for rule in self.rules if rule.get("enabled", True)]
+        enabled_rules = self.detection_view.enabled_rule_dicts
         if not enabled_rules:
             return False
 
@@ -114,4 +120,3 @@ class DetectionRuleEngine:
                 return True
 
         return False
-

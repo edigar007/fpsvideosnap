@@ -37,10 +37,7 @@ def app(config_manager, temp_project):
     app = Flask(__name__)
     app.register_blueprint(api_bp, url_prefix="/api")
     app.config['UPLOAD_FOLDER'] = str(temp_project / "uploads")
-    
-    # Monkeypatch global config_manager in api.py
-    import src.tools.config_assistant.api as api_mod
-    api_mod.config_manager = config_manager
+    app.config["CONFIG_MANAGER"] = config_manager
     
     return app
 

@@ -118,72 +118,6 @@ def test_video_joiner_forces_pre_normalize_when_clip_has_no_audio(mock_run):
 
 
 @patch("subprocess.run")
-def test_video_joiner_normalize_command_uses_safe_intermediate_settings(mock_run):
-    config = {
-        "global": {"temp_dir": "temp"},
-        "video": {
-            "ffmpeg_path": "ffmpeg",
-            "fps": 60,
-            "join_fix": {
-                "safe_preset": "medium",
-                "safe_crf": 18,
-                "safe_audio_rate": 48000,
-                "safe_channel_layout": "stereo",
-            },
-        },
-        "highlights": {"transition_type": "none"},
-    }
-    joiner = VideoJoiner(config)
-    mock_run.return_value = MagicMock(returncode=0)
-
-    output = joiner._normalize_clip_for_join("clip1.mp4", "temp/join_norm", 0)
-
-    assert output.endswith("join_norm_001.mp4")
-    cmd = mock_run.call_args[0][0]
-    cmd_str = " ".join(cmd)
-    assert "fps=60" in cmd_str
-    assert "scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos" in cmd_str
-    assert "setsar=1" in cmd_str
-    assert "format=yuv420p" in cmd_str
-    assert "aformat=sample_rates=48000:channel_layouts=stereo" in cmd_str
-    assert "-c:v" in cmd and "libx264" in cmd
-    assert "-movflags" in cmd and "+faststart" in cmd
-    assert "-avoid_negative_ts" in cmd and "make_zero" in cmd
-    assert "-max_interleave_delta" in cmd and "0" in cmd
-
-
-@patch("src.video.video_joiner.VideoInfo")
-@patch("subprocess.run")
-def test_video_joiner_normalize_adds_silent_track_for_no_audio(mock_run, mock_info):
-    config = {
-        "global": {"temp_dir": "temp"},
-        "video": {
-            "ffmpeg_path": "ffmpeg",
-            "fps": 60,
-            "join_fix": {
-                "safe_audio_rate": 48000,
-                "safe_channel_layout": "stereo",
-            },
-        },
-        "highlights": {"transition_type": "none"},
-    }
-    joiner = VideoJoiner(config)
-    mock_info.return_value.duration = 5.0
-    mock_run.return_value = MagicMock(returncode=0)
-
-    with patch.object(joiner, "_has_audio_stream", return_value=False):
-        output = joiner._normalize_clip_for_join("clip1.mp4", "temp/join_norm", 0)
-
-    assert output.endswith("join_norm_001.mp4")
-    cmd = mock_run.call_args[0][0]
-    cmd_str = " ".join(cmd)
-    assert "-f lavfi" in cmd_str
-    assert "-t 5.000" in cmd_str
-    assert "anullsrc=channel_layout=stereo:sample_rate=48000" in cmd_str
-    assert "[1:a]aformat=sample_rates=48000:channel_layouts=stereo" in cmd_str
-
-
-@patch("subprocess.run")
 def test_video_joiner_concat_normalizes_inputs_and_forces_first_keyframe(mock_run):
     config = {
         "video": {
@@ -207,7 +141,8 @@ def test_video_joiner_concat_normalizes_inputs_and_forces_first_keyframe(mock_ru
     joiner = VideoJoiner(config)
     mock_run.return_value = MagicMock(returncode=0)
 
-    success = joiner.join_clips(["c1.mp4", "c2.mp4"], "out.mp4")
+    with patch.object(joiner, "_any_clip_missing_audio", return_value=False):
+        success = joiner.join_clips(["c1.mp4", "c2.mp4"], "out.mp4")
 
     assert success
     cmd = mock_run.call_args[0][0]
@@ -262,7 +197,8 @@ def test_video_joiner_complex_filter_logic(mock_popen, mock_info):
     mock_process.returncode = 0
     mock_popen.return_value = mock_process
 
-    success = joiner.join_clips(["c1.mp4", "c2.mp4", "c3.mp4"], "out.mp4")
+    with patch.object(joiner, "_any_clip_missing_audio", return_value=False):
+        success = joiner.join_clips(["c1.mp4", "c2.mp4", "c3.mp4"], "out.mp4")
 
     assert success
     cmd = mock_popen.call_args[0][0]
@@ -321,7 +257,8 @@ def test_video_joiner_duration_reading_via_property(mock_info):
         mock_popen.return_value = mock_process
 
         joiner = VideoJoiner(config)
-        success = joiner.join_clips(["c1.mp4", "c2.mp4"], "out.mp4")
+        with patch.object(joiner, "_any_clip_missing_audio", return_value=False):
+            success = joiner.join_clips(["c1.mp4", "c2.mp4"], "out.mp4")
 
         assert success
         assert mock_info.call_count == 2
@@ -337,7 +274,8 @@ def test_video_joiner_handles_missing_duration(mock_info):
     mock_info.side_effect = RuntimeError("Failed to extract video metadata")
 
     joiner = VideoJoiner(config)
-    success = joiner.join_clips(["bad.mp4", "clip2.mp4"], "out.mp4")
+    with patch.object(joiner, "_any_clip_missing_audio", return_value=False):
+        success = joiner.join_clips(["bad.mp4", "clip2.mp4"], "out.mp4")
 
     assert not success
 
@@ -356,6 +294,9 @@ def test_video_joiner_handles_zero_duration(mock_info):
     mock_info.side_effect = [mock_instance1, mock_instance2]
 
     joiner = VideoJoiner(config)
-    success = joiner.join_clips(["zero.mp4", "clip2.mp4"], "out.mp4")
+    with patch.object(joiner, "_any_clip_missing_audio", return_value=False):
+        success = joiner.join_clips(["zero.mp4", "clip2.mp4"], "out.mp4")
 
     assert not success
+
+

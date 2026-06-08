@@ -1,12 +1,19 @@
+import json
 import os
 import shutil
 import subprocess
 import tempfile
-import json
+from enum import Enum
 from typing import List, Dict, Any, Tuple
 from src.utils.logger import logger
 from src.video.video_info import VideoInfo
 from src.video.transitions import TransitionManager
+
+
+class AudioProbeResult(Enum):
+    HAS_AUDIO = "has_audio"
+    NO_AUDIO = "no_audio"
+    PROBE_FAILED = "probe_failed"
 
 
 class VideoJoiner:
@@ -96,9 +103,21 @@ class VideoJoiner:
         return normalized_paths, normalized_dir
 
     def _any_clip_missing_audio(self, clip_paths: List[str]) -> bool:
-        return any(not self._has_audio_stream(path) for path in clip_paths)
+        for path in clip_paths:
+            probe_result = self._probe_audio_stream(path)
+            if probe_result == AudioProbeResult.PROBE_FAILED:
+                raise RuntimeError(f"Could not probe audio stream for {path}")
+            if probe_result == AudioProbeResult.NO_AUDIO:
+                return True
+        return False
 
     def _has_audio_stream(self, input_path: str) -> bool:
+        probe_result = self._probe_audio_stream(input_path)
+        if probe_result == AudioProbeResult.PROBE_FAILED:
+            raise RuntimeError(f"Could not probe audio stream for {input_path}")
+        return probe_result == AudioProbeResult.HAS_AUDIO
+
+    def _probe_audio_stream(self, input_path: str) -> AudioProbeResult:
         cmd = [
             self.ffprobe_path,
             "-v",
@@ -114,10 +133,11 @@ class VideoJoiner:
         try:
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
             data = json.loads(result.stdout or "{}")
-            return bool(data.get("streams"))
-        except Exception as exc:
-            logger.debug(f"Could not probe audio stream for {input_path}, assuming audio exists: {exc}")
-            return True
+        except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, TypeError) as exc:
+            logger.error(f"Could not probe audio stream for {input_path}: {exc}")
+            return AudioProbeResult.PROBE_FAILED
+
+        return AudioProbeResult.HAS_AUDIO if data.get("streams") else AudioProbeResult.NO_AUDIO
 
     def _normalize_clip_for_join(self, input_path: str, temp_dir: str, index: int) -> str:
         output_path = os.path.join(temp_dir, f"join_norm_{index + 1:03d}.mp4")

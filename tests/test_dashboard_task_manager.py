@@ -1,15 +1,70 @@
 from queue import Queue
+from queue import Empty
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.pipeline.pipeline import StageStatus
 from src.pipeline.results import PipelineRunResult
-from src.tools.dashboard.task_manager import _run_processing_task
 from src.tools.dashboard.task_manager import _make_output_file
+from src.tools.dashboard.task_manager import ProgressInfo, TaskInfo, TaskManager, TaskRuntime, TaskStatus
+from src.tools.dashboard.task_manager import _run_processing_task
 
 
 class _CancelEvent:
+    def __init__(self):
+        self.cancelled = False
+
+    def set(self):
+        self.cancelled = True
+
     def is_set(self):
-        return False
+        return self.cancelled
+
+
+class _FakeProcess:
+    def __init__(self):
+        self.started = False
+        self.alive = True
+        self.terminated = False
+        self.killed = False
+        self.join_calls = []
+
+    def start(self):
+        self.started = True
+
+    def is_alive(self):
+        return self.alive
+
+    def join(self, timeout=None):
+        self.join_calls.append(timeout)
+
+    def terminate(self):
+        self.terminated = True
+        self.alive = False
+
+    def kill(self):
+        self.killed = True
+        self.alive = False
+
+
+class _ClosableQueue:
+    def __init__(self, item=None):
+        self.item = item
+        self.closed = False
+        self.joined = False
+
+    def get_nowait(self):
+        if self.item is None:
+            raise Empty
+        item = self.item
+        self.item = None
+        return item
+
+    def close(self):
+        self.closed = True
+
+    def join_thread(self):
+        self.joined = True
 
 
 def test_make_output_file_metadata(tmp_path):
@@ -28,6 +83,85 @@ def test_make_output_file_metadata(tmp_path):
 
 def test_make_output_file_missing_path_returns_none():
     assert _make_output_file(None, "高光视频", "video") is None
+
+
+def test_task_runtime_cancel_escalates_after_grace_period():
+    process = _FakeProcess()
+    cancel_event = _CancelEvent()
+    progress_queue = _ClosableQueue()
+    result_queue = _ClosableQueue()
+    runtime = TaskRuntime(
+        process=process,
+        progress_queue=progress_queue,
+        result_queue=result_queue,
+        cancel_event=cancel_event,
+    )
+
+    runtime.request_cancel(graceful_timeout=0.01, terminate_timeout=0.02)
+
+    assert cancel_event.is_set() is True
+    assert process.join_calls == [0.01, 0.02]
+    assert process.terminated is True
+    assert process.killed is False
+
+
+def test_task_runtime_close_releases_queues():
+    process = _FakeProcess()
+    process.alive = False
+    progress_queue = _ClosableQueue()
+    result_queue = _ClosableQueue()
+    runtime = TaskRuntime(
+        process=process,
+        progress_queue=progress_queue,
+        result_queue=result_queue,
+        cancel_event=_CancelEvent(),
+    )
+
+    runtime.close()
+
+    assert progress_queue.closed is True
+    assert progress_queue.joined is True
+    assert result_queue.closed is True
+    assert result_queue.joined is True
+
+
+def test_task_manager_monitor_keeps_cancelled_status_when_result_arrives():
+    manager = TaskManager()
+    manager.clear()
+    process = _FakeProcess()
+    process.alive = False
+    cancel_event = _CancelEvent()
+    cancel_event.set()
+    manager.task_info = TaskInfo(status=TaskStatus.RUNNING, progress=ProgressInfo())
+    manager.runtime = TaskRuntime(
+        process=process,
+        progress_queue=_ClosableQueue(),
+        result_queue=_ClosableQueue({"success": True}),
+        cancel_event=cancel_event,
+    )
+
+    manager._monitor_process()
+
+    assert manager.task_info.status == TaskStatus.CANCELLED
+    manager.clear()
+
+
+def test_task_manager_clear_closes_runtime_and_status_is_safe():
+    manager = TaskManager()
+    manager.clear()
+    fake_runtime = SimpleNamespace(close_called=False)
+
+    def close():
+        fake_runtime.close_called = True
+
+    fake_runtime.close = close
+    manager.runtime = fake_runtime
+    manager.task_info = TaskInfo(status=TaskStatus.RUNNING)
+
+    manager.clear()
+
+    assert fake_runtime.close_called is True
+    assert manager.get_status()["status"] == "idle"
 
 
 def test_processing_task_fails_when_pipeline_run_fails(tmp_path):

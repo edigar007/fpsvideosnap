@@ -10,6 +10,7 @@ from src.ai.rule_engine import DetectionRuleEngine
 from src.ai.signal_extractors import ColorSignalExtractor, DetectionSignalExtractor
 from src.ai.signal_fusion import WeightedSignalFusion
 from src.ai.signals import SignalResult
+from src.config.detection_view import DetectionConfigView
 from src.utils.logger import get_logger
 from src.utils.performance_profiler import get_profiler
 
@@ -35,9 +36,10 @@ class KillDetector:
         self.config = game_config
         
         detection_cfg = game_config.get('detection', {})
+        self.detection_view = DetectionConfigView.from_config(detection_cfg)
         
         # Detection thresholds from config
-        self.conf_threshold = detection_cfg.get('confidence_threshold', 0.5)
+        self.conf_threshold = self.detection_view.confidence_threshold
         self.roi = detection_cfg.get('killfeed_roi', [0, 0, 1, 1])
         self.colors = detection_cfg.get('colors', {})
         
@@ -57,18 +59,13 @@ class KillDetector:
         self.color_threshold = prefilter_cfg.get('color_threshold', 0.01)
         
         # Weights (TASK-021)
-        self.weights = detection_cfg.get('weights', {
-            'ocr': 0.4,
-            'template': 0.3,
-            'color': 0.2,
-            'yolo': 0.1
-        })
+        self.weights = dict(self.detection_view.weights)
         
         # OR-of-AND Rules mode
         self.signal_extractor = DetectionSignalExtractor()
         self.color_extractor = ColorSignalExtractor()
         self.signal_fusion = WeightedSignalFusion()
-        self.rule_engine = DetectionRuleEngine(detection_cfg, templates_loaded=lambda: bool(self.cv.templates))
+        self.rule_engine = DetectionRuleEngine(self.detection_view, templates_loaded=lambda: bool(self.cv.templates))
         self.batch_runner = BatchDetectionRunner(self)
         
         # Multi-threading settings

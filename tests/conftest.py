@@ -4,6 +4,7 @@ Pytest configuration and fixtures for FPS Video Snap tests.
 This file mocks heavy ML dependencies (torch, paddle, etc.) to allow
 unit tests to run without GPU libraries installed.
 """
+import importlib.util
 import sys
 from unittest.mock import MagicMock
 
@@ -24,7 +25,6 @@ for mod_name in _mock_modules:
         sys.modules[mod_name] = MagicMock()
 
 # Special handling for importlib.util.find_spec to not break on mocked modules
-import importlib.util
 _original_find_spec = importlib.util.find_spec
 
 def _patched_find_spec(name, package=None):

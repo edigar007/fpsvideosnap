@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Optional
@@ -102,6 +103,10 @@ class CheckpointStore:
         if not checkpoint_path:
             return
 
+        checkpoint_dir = os.path.dirname(os.path.abspath(checkpoint_path))
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        temp_path = f"{checkpoint_path}.tmp"
+        backup_path = f"{checkpoint_path}.bak"
         checkpoint_data = {
             "checkpoint_version": self.checkpoint_version,
             "video_path": video_path,
@@ -115,21 +120,31 @@ class CheckpointStore:
             "timestamp": datetime.now().isoformat(),
         }
         try:
-            with open(checkpoint_path, "w", encoding="utf-8") as f:
+            with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump(checkpoint_data, f, indent=4)
-        except OSError as exc:
+                f.flush()
+                os.fsync(f.fileno())
+            if os.path.exists(checkpoint_path):
+                shutil.copy2(checkpoint_path, backup_path)
+            os.replace(temp_path, checkpoint_path)
+        except (OSError, TypeError, ValueError) as exc:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError as cleanup_exc:
+                    logger.warning(f"Failed to remove temporary checkpoint {temp_path}: {cleanup_exc}")
             logger.error(f"Failed to save checkpoint: {exc}")
 
     def load(self, checkpoint_path: str, current_video_path: str) -> Optional[CheckpointData]:
         if not os.path.exists(checkpoint_path):
             return None
 
-        try:
-            with open(checkpoint_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.error(f"Failed to load checkpoint: {exc}")
-            return None
+        data = self._load_checkpoint_json(checkpoint_path)
+        if data is None:
+            backup_path = f"{checkpoint_path}.bak"
+            data = self._load_checkpoint_json(backup_path, is_backup=True)
+            if data is None:
+                return None
 
         checkpoint_version = data.get("checkpoint_version", 1)
         if checkpoint_version < self.checkpoint_version:
@@ -151,6 +166,17 @@ class CheckpointStore:
             fingerprints=data.get("fingerprints", {}),
         )
 
+    def _load_checkpoint_json(self, checkpoint_path: str, is_backup: bool = False) -> Optional[Dict[str, Any]]:
+        if not os.path.exists(checkpoint_path):
+            return None
+
+        try:
+            with open(checkpoint_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            label = "backup checkpoint" if is_backup else "checkpoint"
+            logger.error(f"Failed to load {label} {checkpoint_path}: {exc}")
+            return None
+
     def get_invalid_stage(self, checkpoint: CheckpointData) -> Optional[str]:
         return self.artifact_validator.get_invalid_stage(checkpoint)
-

@@ -8,6 +8,4 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/debug/*.py" = ["E", "F", "B"]
-"tests/conftest.py" = ["E", "F", "B"]
-"tests/integration/test_kill_detection_fused.py" = ["E", "F", "B"]
 "tests/manual/*.py" = ["E", "F", "B"]

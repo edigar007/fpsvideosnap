@@ -51,6 +51,57 @@ class TaskInfo:
     progress: ProgressInfo = field(default_factory=ProgressInfo)
 
 
+@dataclass
+class TaskRuntime:
+    """Runtime resources owned by one dashboard processing task."""
+
+    process: multiprocessing.Process
+    progress_queue: multiprocessing.Queue
+    result_queue: multiprocessing.Queue
+    cancel_event: multiprocessing.Event
+    monitor_thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        self.process.start()
+
+    def attach_monitor(self, monitor_thread: threading.Thread) -> None:
+        self.monitor_thread = monitor_thread
+
+    def is_alive(self) -> bool:
+        return self.process.is_alive()
+
+    def request_cancel(self, graceful_timeout: float = 1.0, terminate_timeout: float = 5.0) -> None:
+        self.cancel_event.set()
+        if not self.process.is_alive():
+            return
+
+        self.process.join(timeout=graceful_timeout)
+        if self.process.is_alive():
+            self.process.terminate()
+            self.process.join(timeout=terminate_timeout)
+        if self.process.is_alive():
+            self.process.kill()
+            self.process.join(timeout=terminate_timeout)
+
+    def close(self) -> None:
+        if self.process.is_alive():
+            self.request_cancel(graceful_timeout=0.2, terminate_timeout=1.0)
+
+        if (
+            self.monitor_thread
+            and self.monitor_thread.is_alive()
+            and self.monitor_thread is not threading.current_thread()
+        ):
+            self.monitor_thread.join(timeout=2)
+
+        for queue in (self.progress_queue, self.result_queue):
+            try:
+                queue.close()
+                queue.join_thread()
+            except (AttributeError, OSError, ValueError):
+                continue
+
+
 def _make_output_file(path: Optional[str], label: str, file_type: str) -> Optional[Dict[str, Any]]:
     return make_output_file(path, label, file_type)
 
@@ -79,13 +130,9 @@ class TaskManager:
             
         self._initialized = True
         self.task_info = TaskInfo()
-        self.process: Optional[multiprocessing.Process] = None
-        self.progress_queue: Optional[multiprocessing.Queue] = None
-        self.result_queue: Optional[multiprocessing.Queue] = None
-        self.cancel_event: Optional[multiprocessing.Event] = None
+        self.runtime: Optional[TaskRuntime] = None
         self._error_buffer: List[Dict] = []
         self._max_error_buffer = 50
-        self._monitor_thread: Optional[threading.Thread] = None
     
     def start_task(self, videos: List[str], game: str) -> Dict[str, Any]:
         """Start a new processing task."""
@@ -115,47 +162,56 @@ class TaskManager:
             )
         )
         
-        # Create queues and event
-        self.progress_queue = multiprocessing.Queue(maxsize=1000)
-        self.result_queue = multiprocessing.Queue()
-        self.cancel_event = multiprocessing.Event()
+        progress_queue = multiprocessing.Queue(maxsize=1000)
+        result_queue = multiprocessing.Queue()
+        cancel_event = multiprocessing.Event()
         
         # Start worker process
-        self.process = multiprocessing.Process(
+        process = multiprocessing.Process(
             target=_run_processing_task,
-            args=(videos, game, self.progress_queue, self.result_queue, self.cancel_event),
+            args=(videos, game, progress_queue, result_queue, cancel_event),
             daemon=True
         )
-        self.process.start()
+        self.runtime = TaskRuntime(
+            process=process,
+            progress_queue=progress_queue,
+            result_queue=result_queue,
+            cancel_event=cancel_event,
+        )
+        self.runtime.start()
         
         # Start monitor thread
-        self._monitor_thread = threading.Thread(target=self._monitor_process, daemon=True)
-        self._monitor_thread.start()
+        monitor_thread = threading.Thread(target=self._monitor_process, daemon=True)
+        self.runtime.attach_monitor(monitor_thread)
+        monitor_thread.start()
         
         return {"success": True, "message": "Task started"}
     
     def _monitor_process(self):
         """Monitor the worker process and collect results."""
-        if self.process is None:
+        runtime = self.runtime
+        if runtime is None:
             return
         
-        while self.process.is_alive():
+        while runtime.is_alive():
             self._drain_progress_queue()
             time.sleep(0.2)
         
         self._drain_progress_queue()
         
         try:
-            result = self.result_queue.get_nowait()
+            result = runtime.result_queue.get_nowait()
             self.task_info.result = result
             
-            if result.get("success"):
+            if runtime.cancel_event.is_set():
+                self.task_info.status = TaskStatus.CANCELLED
+            elif result.get("success"):
                 self.task_info.status = TaskStatus.COMPLETED
             else:
                 self.task_info.status = TaskStatus.FAILED
                 self.task_info.error = result.get("error")
         except Empty:
-            if self.cancel_event and self.cancel_event.is_set():
+            if runtime.cancel_event.is_set():
                 self.task_info.status = TaskStatus.CANCELLED
             else:
                 self.task_info.status = TaskStatus.FAILED
@@ -165,12 +221,13 @@ class TaskManager:
     
     def _drain_progress_queue(self):
         """Drain the progress queue and update task info."""
-        if not self.progress_queue:
+        runtime = self.runtime
+        if runtime is None:
             return
         
         while True:
             try:
-                msg = self.progress_queue.get_nowait()
+                msg = runtime.progress_queue.get_nowait()
                 msg_type = msg.get("type", "")
                 
                 if msg_type == "progress":
@@ -202,14 +259,14 @@ class TaskManager:
         if self.task_info.status != TaskStatus.RUNNING:
             return {"success": False, "error": "No task is running"}
         
-        if self.cancel_event:
-            self.cancel_event.set()
-        
-        if self.process and self.process.is_alive():
-            self.process.terminate()
-            self.process.join(timeout=5)
-            if self.process.is_alive():
-                self.process.kill()
+        if self.runtime:
+            self.runtime.request_cancel()
+            if (
+                self.runtime.monitor_thread
+                and self.runtime.monitor_thread.is_alive()
+                and self.runtime.monitor_thread is not threading.current_thread()
+            ):
+                self.runtime.monitor_thread.join(timeout=2)
         
         self.task_info.status = TaskStatus.CANCELLED
         self.task_info.end_time = time.time()
@@ -262,15 +319,12 @@ class TaskManager:
     
     def clear(self):
         """Clear task state for new task."""
-        if self.task_info.status == TaskStatus.RUNNING:
-            self.cancel_task()
+        if self.runtime:
+            self.runtime.close()
         
         self.task_info = TaskInfo()
         self._error_buffer = []
-        self.process = None
-        self.progress_queue = None
-        self.result_queue = None
-        self.cancel_event = None
+        self.runtime = None
 
 
 # Global instance

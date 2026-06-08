@@ -6,6 +6,7 @@ import shutil
 import socket
 from flask import Flask, send_from_directory
 from src.tools.config_assistant.api import api_bp
+from src.tools.config_assistant.config_manager import config_manager
 from src.utils.logger import get_logger, setup_logger
 
 logger = get_logger("config_assistant.server")
@@ -27,6 +28,7 @@ def create_app():
     
     app.config['UPLOAD_FOLDER'] = upload_folder
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
+    app.config["CONFIG_MANAGER"] = config_manager
     
     # Register blueprints
     app.register_blueprint(api_bp, url_prefix="/api")

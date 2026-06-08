@@ -64,8 +64,9 @@ def cv_matcher():
     matcher.templates_gray = {'skull': np.zeros((10, 10), dtype=np.uint8)}
     return matcher
 
-def create_dummy_frame(color_hsv=None, roi=[0.7, 0.7, 0.2, 0.2], fill_percent=0.0):
+def create_dummy_frame(color_hsv=None, roi=None, fill_percent=0.0):
     """Creates a dummy frame with a specific color in the ROI."""
+    roi = roi or [0.7, 0.7, 0.2, 0.2]
     frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
     if color_hsv is not None and fill_percent > 0:
         h, w = frame.shape[:2]
