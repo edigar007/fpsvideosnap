@@ -51,3 +51,5 @@ detection:
 highlights:
   pre_kill_time: 5.0
   post_kill_time: 2.0
+video:
+  frame_interval_ms: 2000
