@@ -14,10 +14,10 @@ detection:
   templates:
     killicon:
       roi:
-      - 0.20879120879120874
-      - 0.29936305732484114
-      - 0.10622710622710643
-      - 0.15286624203821625
+      - 0.4293561490006595
+      - 0.5554773873888226
+      - 0.15080691183907463
+      - 0.1806974675198949
       threshold: 0.8
       path: models/templates/battlefield_1/killicon.png
   template_dir: models/templates/battlefield_1
@@ -44,12 +44,13 @@ detection:
     yolo: 0.0
   prefilter:
     enabled: true
-    color_threshold: 0.01
+    color_threshold: 0.005
   use_threading: true
   max_workers: 4
   confidence_threshold: 0.5
 highlights:
   pre_kill_time: 5.0
-  post_kill_time: 2.0
+  post_kill_time: 3.0
+  music_path: r"assets\music\Johan Soderqvist、Patrik Andrén - Battlefield Classic Theme - Mayhem View.mp3"
 video:
   frame_interval_ms: 2000
