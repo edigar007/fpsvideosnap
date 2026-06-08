@@ -55,7 +55,7 @@ class TestConfigLoader(unittest.TestCase):
         self.assertEqual(detection["weights"], {
             "ocr": 0.0,
             "template": 0.9,
-            "color": 0.0,
+            "color": 0.1,
             "yolo": 0.0,
         })
         self.assertEqual(detection["prefilter"], {

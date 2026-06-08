@@ -1,0 +1,52 @@
+game_name: battlefield_1
+detection:
+  killfeed_roi:
+  - 0.4293561490006595
+  - 0.5554773873888226
+  - 0.15080691183907463
+  - 0.1806974675198949
+  ocr:
+    enabled: false
+    keywords: []
+    similarity_threshold: 0.8
+    required: false
+  templates:
+    killicon:
+      roi:
+      - 0.20879120879120874
+      - 0.29936305732484114
+      - 0.10622710622710643
+      - 0.15286624203821625
+      threshold: 0.8
+      path: models/templates/battlefield_1/killicon.png
+  template_dir: models/templates/battlefield_1
+  colors:
+    red_name:
+      hsv:
+      - 6
+      - 91
+      - 120
+      hsv_lower:
+      - 0
+      - 51
+      - 80
+      hsv_upper:
+      - 26
+      - 131
+      - 160
+      tolerance: 20
+  rules: []
+  weights:
+    ocr: 0.0
+    template: 0.9
+    color: 0.1
+    yolo: 0.0
+  prefilter:
+    enabled: true
+    color_threshold: 0.01
+  use_threading: true
+  max_workers: 4
+  confidence_threshold: 0.5
+highlights:
+  pre_kill_time: 5.0
+  post_kill_time: 2.0

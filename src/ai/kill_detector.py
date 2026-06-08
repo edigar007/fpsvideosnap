@@ -256,19 +256,7 @@ class KillDetector:
             signals['ocr'] = 0.0
         
         # Template signal
-        max_template_conf = 0.0
-        templates_cfg = detection_cfg.get('templates', {})
-        if not templates_cfg:
-            # Fallback to all loaded templates if not specified
-            for t_name in self.cv.templates:
-                _, score = self.cv.match_template(frame, t_name, roi=roi)
-                max_template_conf = max(max_template_conf, score)
-        else:
-            for t_name in templates_cfg:
-                if t_name in self.cv.templates:
-                    _, score = self.cv.match_template(frame, t_name, roi=roi)
-                    max_template_conf = max(max_template_conf, score)
-        signals['template'] = max_template_conf
+        signals['template'] = self._match_configured_templates(frame, detection_cfg, roi)
         
         # Color signal
         colors_cfg = detection_cfg.get('colors', {})
@@ -292,6 +280,44 @@ class KillDetector:
             signals['yolo'] = max_yolo_conf
         
         return signals
+
+    def _match_configured_templates(self, frame: np.ndarray, detection_cfg: dict, default_roi: list) -> float:
+        """
+        Match configured templates and return the best accepted score.
+        Scores below each template's threshold are treated as no signal.
+        """
+        if not self.cv.templates:
+            return 0.0
+
+        max_template_conf = 0.0
+        templates_cfg = detection_cfg.get('templates', {})
+        if not templates_cfg:
+            for t_name in self.cv.templates:
+                loc, score = self.cv.match_template(frame, t_name, threshold=0.8, roi=default_roi)
+                if loc is not None:
+                    max_template_conf = max(max_template_conf, score)
+            return max_template_conf
+
+        for t_name, t_cfg in templates_cfg.items():
+            if t_name not in self.cv.templates:
+                continue
+
+            threshold = 0.8
+            template_roi = default_roi
+            if isinstance(t_cfg, dict):
+                threshold = t_cfg.get('threshold', 0.8)
+                template_roi = t_cfg.get('roi', default_roi)
+
+            loc, score = self.cv.match_template(
+                frame,
+                t_name,
+                threshold=threshold,
+                roi=template_roi,
+            )
+            if loc is not None:
+                max_template_conf = max(max_template_conf, score)
+
+        return max_template_conf
 
     def _get_signal_booleans_for_config(self, signals: dict, detection_cfg: dict, cached_color_pct: Optional[float] = None) -> dict:
         """Convert signals to booleans using the provided detection config."""
@@ -392,20 +418,7 @@ class KillDetector:
 
         # 2. Template Signal
         profiler.start('precise_template_matching')
-        max_template_conf = 0.0
-        if self.cv.templates:
-            # We check templates defined in config
-            template_list = detection_cfg.get('templates', {})
-            if not template_list:
-                # Fallback to all loaded templates if not specified
-                for t_name in self.cv.templates:
-                    _, score = self.cv.match_template(frame, t_name, roi=self.roi)
-                    max_template_conf = max(max_template_conf, score)
-            else:
-                for t_name in template_list:
-                    _, score = self.cv.match_template(frame, t_name, roi=self.roi)
-                    max_template_conf = max(max_template_conf, score)
-        signals['template'] = max_template_conf
+        signals['template'] = self._match_configured_templates(frame, detection_cfg, self.roi)
         profiler.end('precise_template_matching')
 
         # 3. YOLO Signal

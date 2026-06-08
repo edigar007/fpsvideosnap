@@ -292,6 +292,84 @@ def test_detection_weights_with_templates(tmp_path, mock_yolo_model):
     assert result_no_templates["is_kill"] is True
     assert result_with_templates["is_kill"] is True
 
+def test_template_score_below_threshold_does_not_contribute_to_weighted_confidence():
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    yolo = MagicMock()
+    yolo.detect_single.return_value = []
+
+    cv_matcher = MagicMock()
+    cv_matcher.templates = {"kill_icon": object()}
+    cv_matcher.match_template.return_value = (None, 0.55)
+    cv_matcher.detect_color.return_value = 0.02
+
+    game_config = {
+        'detection': {
+            'confidence_threshold': 0.5,
+            'killfeed_roi': [0, 0, 1, 1],
+            'templates': {
+                'kill_icon': {
+                    'threshold': 0.8,
+                }
+            },
+            'colors': {
+                'kill_color': {
+                    'lower': [100, 100, 100],
+                    'upper': [140, 255, 255],
+                }
+            },
+            'prefilter': {'color_threshold': 0.01},
+            'weights': {
+                'ocr': 0.0,
+                'template': 0.9,
+                'color': 0.1,
+                'yolo': 0.0,
+            },
+        }
+    }
+
+    detector = KillDetector(yolo, cv_matcher, game_config)
+    result = detector.process_frame(frame)
+
+    assert result["signals"]["template"] == 0.0
+    assert result["confidence"] == pytest.approx(0.1)
+    assert result["is_kill"] is False
+
+def test_template_matching_uses_template_roi_and_threshold():
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    yolo = MagicMock()
+    yolo.detect_single.return_value = []
+
+    cv_matcher = MagicMock()
+    cv_matcher.templates = {"kill_icon": object()}
+    cv_matcher.match_template.return_value = ((20, 30), 0.9)
+    cv_matcher.detect_color.return_value = 0.0
+
+    template_roi = [0.2, 0.3, 0.1, 0.15]
+    game_config = {
+        'detection': {
+            'confidence_threshold': 0.5,
+            'killfeed_roi': [0, 0, 1, 1],
+            'templates': {
+                'kill_icon': {
+                    'roi': template_roi,
+                    'threshold': 0.85,
+                }
+            },
+            'colors': {},
+        }
+    }
+
+    detector = KillDetector(yolo, cv_matcher, game_config)
+    result = detector.process_frame(frame)
+
+    cv_matcher.match_template.assert_called_with(
+        frame,
+        'kill_icon',
+        threshold=0.85,
+        roi=template_roi,
+    )
+    assert result["signals"]["template"] == pytest.approx(0.9)
+
 def test_kill_detector_uses_explicit_color_bounds_without_double_tolerance(mock_yolo_model):
     game_config = {
         'detection': {
