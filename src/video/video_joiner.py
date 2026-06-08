@@ -6,6 +6,7 @@ import tempfile
 from enum import Enum
 from typing import List, Dict, Any, Tuple
 from src.utils.logger import logger
+from src.video.ffmpeg_command import JoinCommandBuilder
 from src.video.video_info import VideoInfo
 from src.video.transitions import TransitionManager
 
@@ -44,6 +45,18 @@ class VideoJoiner:
         self.safe_crf = str(self.join_fix_cfg.get("safe_crf", 18))
         self.safe_audio_rate = str(self.join_fix_cfg.get("safe_audio_rate", 48000))
         self.safe_channel_layout = self.join_fix_cfg.get("safe_channel_layout", "stereo")
+        self.command_builder = JoinCommandBuilder(
+            ffmpeg_path=self.ffmpeg_path,
+            encoder=self.encoder,
+            fps=self.fps,
+            bitrate=self.bitrate,
+            hwaccel=self.hwaccel,
+            output_preset=self.output_preset,
+            safe_preset=self.safe_preset,
+            safe_crf=self.safe_crf,
+            safe_audio_rate=self.safe_audio_rate,
+            safe_channel_layout=self.safe_channel_layout,
+        )
 
     def join_clips(self, clip_paths: List[str], output_path: str) -> bool:
         """Merges clips into one video at output_path."""
@@ -142,70 +155,16 @@ class VideoJoiner:
     def _normalize_clip_for_join(self, input_path: str, temp_dir: str, index: int) -> str:
         output_path = os.path.join(temp_dir, f"join_norm_{index + 1:03d}.mp4")
         has_audio = self._has_audio_stream(input_path)
-        audio_input_label = "[0:a]"
-
-        cmd = [
-            self.ffmpeg_path,
-            "-y",
-            "-fflags", "+genpts",
-            "-i", input_path,
-        ]
-
-        if not has_audio:
-            duration = VideoInfo(input_path, ffprobe_path=self.ffprobe_path).duration
-            cmd.extend(
-                [
-                    "-f",
-                    "lavfi",
-                    "-t",
-                    f"{duration:.3f}",
-                    "-i",
-                    f"anullsrc=channel_layout={self.safe_channel_layout}:sample_rate={self.safe_audio_rate}",
-                ]
-            )
-            audio_input_label = "[1:a]"
-
-        filter_complex = (
-            f"[0:v]"
-            f"fps={self.fps},"
-            f"scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos,"
-            f"setsar=1,"
-            f"format=yuv420p,"
-            f"settb=AVTB,"
-            f"setpts=PTS-STARTPTS[vout];"
-            f"{audio_input_label}"
-            f"aformat=sample_rates={self.safe_audio_rate}:channel_layouts={self.safe_channel_layout},"
-            f"aresample=async=1:first_pts=0,"
-            f"asetpts=PTS-STARTPTS[aout]"
-        )
-
-        cmd.extend(
-            [
-            "-filter_complex", filter_complex,
-            "-map", "[vout]",
-            "-map", "[aout]",
-            "-c:v", "libx264",
-            "-preset", self.safe_preset,
-            "-crf", self.safe_crf,
-            "-g", str(self.fps * 2),
-            "-keyint_min", "1",
-            "-sc_threshold", "0",
-            "-bf", "0",
-            "-pix_fmt", "yuv420p",
-            "-force_key_frames", "0",
-            "-c:a", "aac",
-            "-ar", self.safe_audio_rate,
-            "-ac", "2",
-            "-b:a", "192k",
-            "-movflags", "+faststart",
-            "-avoid_negative_ts", "make_zero",
-            "-max_interleave_delta", "0",
-            output_path,
-            ]
+        duration = VideoInfo(input_path, ffprobe_path=self.ffprobe_path).duration if not has_audio else None
+        command = self.command_builder.build_normalize_command(
+            input_path=input_path,
+            output_path=output_path,
+            has_audio=has_audio,
+            duration=duration,
         )
 
         logger.info(f"Normalizing clip for join: {input_path} -> {output_path}")
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(command.args, check=True, capture_output=True, text=True)
         return output_path
 
     def _join_with_ffmpeg(self, clip_paths: List[str], output_path: str) -> bool:
@@ -253,50 +212,17 @@ class VideoJoiner:
     def _join_with_concat(self, clip_paths: List[str], output_path: str) -> bool:
         """使用concat filter快速拼接，无转场效果"""
         try:
-            cmd = [self.ffmpeg_path, "-y"]
-
-            if self.hwaccel == "cuda":
-                cmd.extend(["-hwaccel", "cuda"])
-
-            for path in clip_paths:
-                cmd.extend(["-i", path])
-
             n = len(clip_paths)
-            filter_parts, video_labels, audio_labels = self._build_normalized_input_filters(n)
-            video_inputs = "".join([f"[{label}]" for label in video_labels])
-            audio_inputs = "".join([f"[{label}]" for label in audio_labels])
-            filter_parts.append(f"{video_inputs}concat=n={n}:v=1:a=0[vout]")
-            filter_parts.append(f"{audio_inputs}concat=n={n}:v=0:a=1[aout]")
-            filter_complex = ";".join(filter_parts)
-
-            cmd.extend([
-                "-filter_complex", filter_complex,
-                "-map", "[vout]",
-                "-map", "[aout]",
-                "-c:v", self.encoder,
-                "-preset", self.output_preset,
-                "-b:v", self.bitrate,
-                "-r", str(self.fps),
-                "-g", str(self.fps * 2),
-                "-bf", "0",
-                "-pix_fmt", "yuv420p",
-                "-force_key_frames", "0",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-movflags", "+faststart",
-                "-avoid_negative_ts", "make_zero",
-                "-max_interleave_delta", "0",
-            ])
-
-            if self.encoder == "h264_nvenc":
-                cmd.extend(["-forced-idr", "1", "-strict_gop", "1"])
-
-            cmd.append(output_path)
+            command = self.command_builder.build_concat_command(
+                clip_paths,
+                output_path,
+                self._build_normalized_input_filters,
+            )
 
             logger.info(f"Joining {n} clips with concat filter (no transitions)...")
-            logger.debug(f"Running FFmpeg: {' '.join(cmd)}")
+            logger.debug(f"Running FFmpeg: {' '.join(command.args)}")
 
-            subprocess.run(cmd, check=True, capture_output=True)
+            subprocess.run(command.args, check=True, capture_output=True)
             logger.info("Successfully joined clips with concat.")
             return True
 
@@ -320,77 +246,21 @@ class VideoJoiner:
                 return False
 
         transition_duration = self.transition_mgr.get_duration()
-
-        cmd = [self.ffmpeg_path, "-y"]
-        if self.hwaccel == "cuda":
-            cmd.extend(["-hwaccel", "cuda"])
-
-        for path in clip_paths:
-            cmd.extend(["-i", path])
-
-        filter_parts, video_labels, audio_labels = self._build_normalized_input_filters(len(clip_paths))
-
-        last_v_label = video_labels[0]
-        last_a_label = audio_labels[0]
-        current_offset = durations[0]
-
-        for i in range(1, len(clip_paths)):
-            trans = self.transition_mgr.get_transition()
-
-            actual_transition_duration = transition_duration
-            if durations[i - 1] < actual_transition_duration or durations[i] < actual_transition_duration:
-                actual_transition_duration = min(durations[i - 1], durations[i]) / 2
-                logger.warning(
-                    f"Clip {i - 1} or {i} is too short. "
-                    f"Reducing transition duration to {actual_transition_duration:.2f}s"
-                )
-
-            offset = current_offset - actual_transition_duration
-
-            next_v_label = f"v{i}"
-            filter_parts.append(
-                f"[{last_v_label}][{video_labels[i]}]"
-                f"xfade=transition={trans}:duration={actual_transition_duration}:offset={offset}"
-                f"[{next_v_label}]"
-            )
-            last_v_label = next_v_label
-
-            next_a_label = f"a{i}"
-            filter_parts.append(
-                f"[{last_a_label}][{audio_labels[i]}]acrossfade=d={actual_transition_duration}[{next_a_label}]"
-            )
-            last_a_label = next_a_label
-
-            current_offset = offset + durations[i]
-
-        filter_complex = ";".join(filter_parts)
-        cmd.extend(["-filter_complex", filter_complex])
-        cmd.extend(["-map", f"[{last_v_label}]", "-map", f"[{last_a_label}]"])
-
-        cmd.extend([
-            "-c:v", self.encoder,
-            "-preset", self.output_preset,
-            "-b:v", self.bitrate,
-            "-r", str(self.fps),
-            "-g", str(self.fps * 2),
-            "-bf", "0",
-            "-pix_fmt", "yuv420p",
-            "-force_key_frames", "0",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-movflags", "+faststart",
-            "-avoid_negative_ts", "make_zero",
-            "-max_interleave_delta", "0",
-        ])
-
-        if self.encoder == "h264_nvenc":
-            cmd.extend(["-forced-idr", "1", "-strict_gop", "1"])
-
-        cmd.append(output_path)
+        transitions = [self.transition_mgr.get_transition() for _ in range(1, len(clip_paths))]
+        command = self.command_builder.build_xfade_command(
+            clip_paths,
+            output_path,
+            durations,
+            transition_duration,
+            transitions,
+            self._build_normalized_input_filters,
+        )
+        for warning in command.warnings:
+            logger.warning(warning)
 
         try:
-            logger.info(f"Running FFmpeg: {' '.join(cmd)}")
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            logger.info(f"Running FFmpeg: {' '.join(command.args)}")
+            process = subprocess.Popen(command.args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate()
 
             if process.returncode != 0:

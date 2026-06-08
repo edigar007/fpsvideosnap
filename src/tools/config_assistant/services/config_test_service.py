@@ -1,4 +1,3 @@
-from copy import deepcopy
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -6,8 +5,8 @@ import cv2
 import numpy as np
 
 from src.ai.color_utils import get_hsv_bounds
+from src.ai.detection_preview import DetectionPreviewEvaluator
 from src.ai.opencv_matcher import OpenCVMatcher
-from src.ai.signal_evaluator import signals_to_booleans
 from src.tools.config_assistant.ocr_service import OCRUnavailableError, get_ocr_service
 from src.utils.logger import get_logger
 
@@ -36,19 +35,11 @@ def normalize_roi(roi: Optional[List[float]]) -> List[float]:
 
 def merge_detection_config(detection_cfg: Dict[str, Any], rule: Dict[str, Any]) -> Dict[str, Any]:
     """Merge rule.detection_overrides into the global detection config."""
-    effective_cfg = deepcopy(detection_cfg)
-    overrides = rule.get("detection_overrides", {})
-    if not isinstance(overrides, dict):
-        return effective_cfg
-
-    for key, value in overrides.items():
-        if isinstance(effective_cfg.get(key), dict) and isinstance(value, dict):
-            merged = deepcopy(effective_cfg[key])
-            merged.update(value)
-            effective_cfg[key] = merged
-        else:
-            effective_cfg[key] = deepcopy(value)
-    return effective_cfg
+    return DetectionPreviewEvaluator(
+        detection_cfg,
+        templates_loaded=False,
+        ocr_active=False,
+    ).merge_detection_config(rule)
 
 
 def text_similarity(text: str, keyword: str) -> float:
@@ -96,29 +87,12 @@ def calculate_weighted_confidence(
     ocr_active: bool,
     yolo_active: bool = False,
 ) -> float:
-    weights = detection_cfg.get("weights", {
-        "ocr": 0.4,
-        "template": 0.3,
-        "color": 0.2,
-        "yolo": 0.1,
-    })
-
-    active_weights = {"color": float(weights.get("color", 0.2))}
-    if templates_loaded:
-        active_weights["template"] = float(weights.get("template", 0.3))
-    if ocr_active:
-        active_weights["ocr"] = float(weights.get("ocr", 0.4))
-    if yolo_active:
-        active_weights["yolo"] = float(weights.get("yolo", 0.1))
-
-    total_weight = sum(active_weights.values())
-    if total_weight == 0:
-        return 0.0
-
-    return sum(
-        float(signals.get(name, 0.0)) * (weight / total_weight)
-        for name, weight in active_weights.items()
-    )
+    return DetectionPreviewEvaluator(
+        detection_cfg,
+        templates_loaded=templates_loaded,
+        ocr_active=ocr_active,
+        yolo_active=yolo_active,
+    ).weighted_confidence(signals)
 
 
 class ConfigTestService:
@@ -254,15 +228,20 @@ class ConfigTestService:
             "color": float(color_signal),
             "yolo": 0.0,
         }
+        evaluator = DetectionPreviewEvaluator(
+            detection_cfg,
+            templates_loaded=bool(template_details),
+            ocr_active=bool(ocr_details["available"]),
+            yolo_active=False,
+        )
 
         return {
             "roi": roi,
             "signals": signals,
-            "booleans": signals_to_booleans(
+            "booleans": evaluator.signal_booleans(
                 signals,
-                detection_cfg,
+                detection_cfg=detection_cfg,
                 cached_color_pct=max_color_pct,
-                templates_loaded=bool(template_details),
             ),
             "color": {
                 "max_match_percent": max_color_pct,
@@ -355,38 +334,13 @@ class ConfigTestService:
         detection_cfg: Dict[str, Any],
         matcher: OpenCVMatcher,
     ) -> Tuple[bool, List[Dict[str, Any]], List[str]]:
-        rules = detection_cfg.get("rules", []) or []
-        enabled_rules = [rule for rule in rules if rule.get("enabled", True)]
-        rule_results = []
-        warnings = []
-
-        for rule in enabled_rules:
-            effective_cfg = merge_detection_config(detection_cfg, rule)
-            result = self._evaluate_test_signals(frame, image_path, effective_cfg, matcher)
-            required = rule.get("require", []) or []
-            matched = bool(required) and all(
-                result["booleans"].get(signal, False)
-                for signal in required
-            )
-            missing = [
-                signal
-                for signal in required
-                if not result["booleans"].get(signal, False)
-            ]
-            if "yolo" in required:
-                warnings.append(
-                    f"Rule '{rule.get('name', 'unnamed')}' requires YOLO, "
-                    "which is not run by this test."
-                )
-
-            rule_results.append({
-                "name": rule.get("name", "unnamed"),
-                "enabled": True,
-                "require": required,
-                "matched": matched,
-                "missing": missing,
-                "signals": result["signals"],
-                "booleans": result["booleans"],
-            })
-
-        return any(item["matched"] for item in rule_results), rule_results, warnings
+        evaluator = DetectionPreviewEvaluator(
+            detection_cfg,
+            templates_loaded=lambda: bool(matcher.templates),
+            ocr_active=bool((detection_cfg.get("ocr", {}) or {}).get("enabled", False)),
+            yolo_active=False,
+        )
+        evaluation = evaluator.evaluate_rules(
+            lambda effective_cfg: self._evaluate_test_signals(frame, image_path, effective_cfg, matcher)
+        )
+        return evaluation.matched, evaluation.rule_results, evaluation.warnings

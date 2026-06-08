@@ -11,6 +11,7 @@ from src.ai.signal_extractors import (
     roi_to_pixels,
 )
 from src.ai.signal_fusion import WeightedSignalFusion
+from src.config.detection_view import DetectionConfigView
 
 
 def test_roi_to_pixels_converts_relative_roi():
@@ -108,6 +109,48 @@ def test_detection_signal_extractor_combines_signals():
     }
 
 
+def test_detection_signal_extractor_accepts_typed_detection_view():
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    yolo = MagicMock()
+    yolo.detect_single.return_value = []
+    matcher = MagicMock()
+    matcher.templates = {"kill": object()}
+    matcher.match_template.return_value = ((1, 2), 0.91)
+    matcher.detect_color.return_value = 0.02
+    ocr = MagicMock()
+    ocr.find_keywords.return_value = {"found": True, "confidence": 95.0}
+    view = DetectionConfigView.from_config(
+        {
+            "killfeed_roi": [0.1, 0.2, 0.3, 0.4],
+            "ocr": {"enabled": True, "keywords": ["KILL"], "similarity_threshold": 0.9},
+            "templates": {"kill": {"threshold": 0.9}},
+            "colors": {"red": {"hsv_lower": [0, 0, 0], "hsv_upper": [10, 255, 255]}},
+        }
+    )
+
+    result = DetectionSignalExtractor().compute(
+        frame,
+        yolo,
+        matcher,
+        ocr,
+        view,
+        [0, 0, 1, 1],
+    )
+
+    assert result == {
+        "ocr": 0.95,
+        "template": 0.91,
+        "color": 1.0,
+        "yolo": 0.0,
+    }
+    ocr.find_keywords.assert_called_once_with(
+        frame,
+        ["KILL"],
+        roi=[10, 20, 30, 40],
+        threshold=0.9,
+    )
+
+
 def test_weighted_signal_fusion_normalizes_active_weights():
     result = WeightedSignalFusion().calculate(
         {"ocr": 1.0, "template": 0.0, "color": 0.5, "yolo": 0.0},
@@ -117,4 +160,3 @@ def test_weighted_signal_fusion_normalizes_active_weights():
     )
 
     assert result == pytest.approx((1.0 * 0.4 / 0.7) + (0.5 * 0.2 / 0.7))
-

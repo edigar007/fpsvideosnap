@@ -190,7 +190,8 @@ class Pipeline:
                 self.stages[name].status = StageStatus(s_data["status"])
                 self.stages[name].duration = s_data["duration"]
 
-        self.results = checkpoint.results
+        self.results.clear()
+        self.results.update(checkpoint.results)
         self.temp_dir = checkpoint.temp_dir or self.temp_dir
         self._loaded_fingerprints = checkpoint.fingerprints
 

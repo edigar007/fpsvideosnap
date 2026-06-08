@@ -40,23 +40,23 @@ class KillDetector:
         
         # Detection thresholds from config
         self.conf_threshold = self.detection_view.confidence_threshold
-        self.roi = detection_cfg.get('killfeed_roi', [0, 0, 1, 1])
-        self.colors = detection_cfg.get('colors', {})
+        self.roi = list(self.detection_view.killfeed_roi)
+        self.colors = dict(self.detection_view.colors.raw)
         
         # OCR Initialization (TASK-021)
-        ocr_cfg = detection_cfg.get('ocr', {})
-        self.ocr_enabled = ocr_cfg.get('enabled', False)
+        ocr_cfg = self.detection_view.ocr
+        self.ocr_enabled = ocr_cfg.enabled
         self.ocr = ocr_detector
         if self.ocr_enabled and self.ocr is None:
             self.ocr = OCRDetector(
-                lang=ocr_cfg.get('lang', 'ch'),
-                use_gpu=ocr_cfg.get('use_gpu', True)
+                lang=ocr_cfg.lang,
+                use_gpu=ocr_cfg.use_gpu
             )
         
         # Prefilter settings (TASK-022)
-        prefilter_cfg = detection_cfg.get('prefilter', {})
-        self.prefilter_enabled = prefilter_cfg.get('enabled', True)
-        self.color_threshold = prefilter_cfg.get('color_threshold', 0.01)
+        prefilter_cfg = self.detection_view.prefilter
+        self.prefilter_enabled = prefilter_cfg.enabled
+        self.color_threshold = prefilter_cfg.color_threshold
         
         # Weights (TASK-021)
         self.weights = dict(self.detection_view.weights)
@@ -182,7 +182,7 @@ class KillDetector:
         Args:
             cached_color_pct: 如果提供，则使用缓存的颜色检测结果，避免重复计算
         """
-        detection_cfg = self.config.get('detection', {})
+        detection_cfg = self.detection_view
 
         # 1. OCR Signal
         profiler.start('precise_ocr_detection')
@@ -238,8 +238,7 @@ class KillDetector:
         results["signals"] = signals
 
         # Step 3: OCR Required logic (TASK-026)
-        ocr_cfg = self.config.get('detection', {}).get('ocr', {})
-        if ocr_cfg.get('required', False) and signals.get('ocr', 0.0) == 0:
+        if self.detection_view.ocr.required and signals.get('ocr', 0.0) == 0:
             results["is_kill"] = False
             results["confidence"] = 0.0
             return results

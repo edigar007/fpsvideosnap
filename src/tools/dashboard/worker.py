@@ -59,6 +59,10 @@ def _send_error(progress_queue, message: str) -> None:
         logger.debug("Dashboard progress queue full while sending error update")
 
 
+def _cancelled_result(stage: str) -> dict:
+    return {"success": False, "error": "Cancelled", "status": "cancelled", "stage": stage}
+
+
 def _configure_worker_logging(progress_queue) -> None:
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
@@ -159,7 +163,7 @@ def run_processing_task(videos: List[str], game: str, progress_queue, result_que
         )
 
         if cancel_event.is_set():
-            result_queue.put({"success": False, "error": "Cancelled"})
+            result_queue.put(_cancelled_result("initializing"))
             return
 
         from src.config.config_loader import get_config
@@ -169,7 +173,7 @@ def run_processing_task(videos: List[str], game: str, progress_queue, result_que
         config = get_config(game_name=game)
 
         if cancel_event.is_set():
-            result_queue.put({"success": False, "error": "Cancelled"})
+            result_queue.put(_cancelled_result("loading_config"))
             return
 
         all_clips = []
@@ -178,7 +182,7 @@ def run_processing_task(videos: List[str], game: str, progress_queue, result_que
 
         for video_idx, video_path in enumerate(videos):
             if cancel_event.is_set():
-                result_queue.put({"success": False, "error": "Cancelled"})
+                result_queue.put(_cancelled_result("video"))
                 return
 
             video_name = os.path.basename(video_path)
@@ -276,6 +280,10 @@ def run_processing_task(videos: List[str], game: str, progress_queue, result_que
                 monitor_thread.join(timeout=1)
 
         if len(videos) > 1 and all_clips:
+            if cancel_event.is_set():
+                result_queue.put(_cancelled_result("merge"))
+                return
+
             _send_progress(
                 progress_queue,
                 {
@@ -294,6 +302,10 @@ def run_processing_task(videos: List[str], game: str, progress_queue, result_que
             from src.pipeline.multi_video import merge_clips_to_highlight
 
             merged_result = merge_clips_to_highlight(config, videos, all_clips)
+            if cancel_event.is_set():
+                result_queue.put(_cancelled_result("merge"))
+                return
+
             if merged_result:
                 output_video = make_output_file(merged_result.get("final_video"), "合并高光视频", "video")
                 output_report = make_output_file(merged_result.get("report_path"), "合并报告", "report")

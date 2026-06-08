@@ -160,6 +160,44 @@ class TestCheckpointVersioning:
                 assert pipeline.stages["detection"].status == StageStatus.PENDING
                 assert "frames" not in pipeline.results
 
+    def test_checkpoint_resume_keeps_runner_results_reference_current(self, base_config):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("src.pipeline.pipeline.temp_manager") as mock_temp:
+                mock_temp.create_temp_dir.return_value = tmpdir
+
+                pipeline = Pipeline(base_config)
+                original_results = pipeline.results
+                pipeline.results["stale"] = True
+                video_path = os.path.abspath(os.path.join(tmpdir, "test_video.mp4"))
+                checkpoint_file = os.path.join(tmpdir, "checkpoint.json")
+                checkpoint_results = {
+                    "video_info": {"path": video_path, "duration": 1},
+                    "final_video": os.path.join(tmpdir, "final.mp4"),
+                }
+                checkpoint_data = {
+                    "checkpoint_version": CHECKPOINT_VERSION,
+                    "video_path": video_path,
+                    "fingerprints": compute_config_fingerprints(base_config),
+                    "stages": {
+                        "metadata": {"status": "SUCCESS", "duration": 0},
+                    },
+                    "results": checkpoint_results,
+                    "temp_dir": tmpdir,
+                }
+
+                with open(checkpoint_file, "w", encoding="utf-8") as f:
+                    json.dump(checkpoint_data, f)
+
+                loaded = pipeline._load_checkpoint(checkpoint_file, video_path)
+                context = pipeline._build_context(video_path, "test_video")
+
+                assert loaded is True
+                assert pipeline.results is original_results
+                assert pipeline.runner.stages.results is pipeline.results
+                assert context.results is pipeline.results
+                assert "stale" not in pipeline.results
+                assert pipeline.results == checkpoint_results
+
     def test_missing_clip_artifact_invalidates_from_clips(self, base_config):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch("src.pipeline.pipeline.temp_manager") as mock_temp:
@@ -302,4 +340,3 @@ class TestConfigUnchangedFinalExists:
             context = pipeline._build_context("test_video.mp4", "test_video")
 
             assert pipeline._run_audio_plan_stage(context, "joined.mp4", resume_completed=True) == saved_final
-

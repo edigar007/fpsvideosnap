@@ -1,7 +1,7 @@
 from queue import Queue
 from queue import Empty
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from src.pipeline.pipeline import StageStatus
 from src.pipeline.results import PipelineRunResult
@@ -243,3 +243,96 @@ def test_processing_task_forwards_real_detection_progress(tmp_path):
         for msg in progress_messages
     )
     assert result_queue.get_nowait()["success"] is True
+
+
+def test_processing_task_cancel_before_multi_video_merge_skips_merge(tmp_path):
+    videos = [str(tmp_path / "input1.mp4"), str(tmp_path / "input2.mp4")]
+    progress_queue = Queue()
+    result_queue = Queue()
+    cancel_event = _CancelEvent()
+    run_count = 0
+
+    class ClipsPipeline:
+        def __init__(self, config, progress_callback=None):
+            self.results = {"frames": [], "events": [], "clips": []}
+            self.stages = {name: type("Stage", (), {"status": StageStatus.PENDING})() for name in [
+                "metadata",
+                "frames",
+                "detection",
+                "clips",
+                "join",
+                "audio",
+            ]}
+
+        def run_until_clips_result(self, path):
+            nonlocal run_count
+            run_count += 1
+            self.results["clips"] = [{"path": f"{path}.clip.mp4"}]
+            if run_count == len(videos):
+                cancel_event.set()
+            return PipelineRunResult(
+                success=True,
+                mode="clips",
+                video_path=path,
+                clips=self.results["clips"],
+            )
+
+    merge = Mock(return_value={"final_video": str(tmp_path / "merged.mp4")})
+
+    with patch("src.config.config_loader.get_config", return_value={}), \
+         patch("src.pipeline.pipeline.Pipeline", ClipsPipeline), \
+         patch("src.pipeline.multi_video.merge_clips_to_highlight", merge):
+        _run_processing_task(videos, "battlefield6", progress_queue, result_queue, cancel_event)
+
+    result = result_queue.get_nowait()
+
+    assert result["success"] is False
+    assert result["status"] == "cancelled"
+    assert result["stage"] == "merge"
+    merge.assert_not_called()
+
+
+def test_processing_task_cancel_after_multi_video_merge_returns_cancelled(tmp_path):
+    videos = [str(tmp_path / "input1.mp4"), str(tmp_path / "input2.mp4")]
+    progress_queue = Queue()
+    result_queue = Queue()
+    cancel_event = _CancelEvent()
+
+    class ClipsPipeline:
+        def __init__(self, config, progress_callback=None):
+            self.results = {"frames": [], "events": [], "clips": []}
+            self.stages = {name: type("Stage", (), {"status": StageStatus.PENDING})() for name in [
+                "metadata",
+                "frames",
+                "detection",
+                "clips",
+                "join",
+                "audio",
+            ]}
+
+        def run_until_clips_result(self, path):
+            self.results["clips"] = [{"path": f"{path}.clip.mp4"}]
+            return PipelineRunResult(
+                success=True,
+                mode="clips",
+                video_path=path,
+                clips=self.results["clips"],
+            )
+
+    def merge_and_cancel(config, input_videos, clips):
+        cancel_event.set()
+        return {"final_video": str(tmp_path / "merged.mp4")}
+
+    merge = Mock(side_effect=merge_and_cancel)
+
+    with patch("src.config.config_loader.get_config", return_value={}), \
+         patch("src.pipeline.pipeline.Pipeline", ClipsPipeline), \
+         patch("src.pipeline.multi_video.merge_clips_to_highlight", merge):
+        _run_processing_task(videos, "battlefield6", progress_queue, result_queue, cancel_event)
+
+    result = result_queue.get_nowait()
+
+    assert result["success"] is False
+    assert result["status"] == "cancelled"
+    assert result["stage"] == "merge"
+    merge.assert_called_once()
