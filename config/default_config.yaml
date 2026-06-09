@@ -42,6 +42,9 @@ video:
     safe_crf: 18
     safe_audio_rate: 48000
     safe_channel_layout: "stereo"
+    # Maximum inputs per xfade command. Large 4K chains can exhaust FFmpeg filter memory.
+    # Set to 0 to disable segmented xfade joining.
+    xfade_segment_size: 4
   # Frame extraction mode:
   # - bulk: single ffmpeg run with fps+showinfo mapping (fast, mapped timestamps)
   # - precise: per-frame ffmpeg -ss extraction (slow, deterministic)

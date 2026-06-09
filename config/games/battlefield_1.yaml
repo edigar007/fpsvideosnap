@@ -51,6 +51,6 @@ detection:
 highlights:
   pre_kill_time: 5.0
   post_kill_time: 3.0
-  music_path: r"assets\music\Johan Soderqvist、Patrik Andrén - Battlefield Classic Theme - Mayhem View.mp3"
+  music_path: "assets/music/Johan Soderqvist、Patrik Andrén - Battlefield Classic Theme - Mayhem View.mp3"
 video:
   frame_interval_ms: 2000
