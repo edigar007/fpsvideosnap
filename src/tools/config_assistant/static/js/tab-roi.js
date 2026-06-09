@@ -1,3 +1,5 @@
+const roiTr = (key, params = {}) => window.i18n ? window.i18n.t(key, params) : key;
+
 /**
  * ROI Tab Logic
  * Handles ROI drawing feedback, coordinates display, and preview.
@@ -75,10 +77,10 @@ class ROITab {
 
     async saveROI() {
         const roi = window.canvasState.roi;
-        if (!roi) return alert('请先在画布上选择区域');
+        if (!roi) return alert(roiTr('config.selectRegionFirst'));
 
         const game = document.getElementById('game-selector').value;
-        if (!game) return alert('请选择游戏');
+        if (!game) return alert(roiTr('config.selectGameFirst'));
 
         const payload = { roi: this.roi || roi };
         const currentRule = window.app?.currentRuleName;
@@ -96,9 +98,9 @@ class ROITab {
             if (response.ok) {
                 const data = await response.json();
                 if (window.showStatus) {
-                    window.showStatus('ROI 已成功保存到配置', 'success');
+                    window.showStatus(roiTr('config.roiSaved'), 'success');
                 } else {
-                    alert('ROI 已成功保存到配置');
+                    alert(roiTr('config.roiSaved'));
                 }
                 
                 // Trigger preview update
@@ -115,11 +117,11 @@ class ROITab {
                 }
             } else {
                 const err = await response.json();
-                alert('保存失败: ' + (err.error || '未知错误'));
+                alert(roiTr('config.saveFailed', { error: err.error || roiTr('config.unknownError') }));
             }
         } catch (err) {
             console.error('Save ROI Error:', err);
-            alert('无法保存 ROI，切检查后端服务是否正常');
+            alert(roiTr('config.saveFailed', { error: err.message || roiTr('config.unknownError') }));
         }
     }
 
@@ -157,7 +159,7 @@ class ROITab {
         
         this.setROI(roi);
         if (window.app?.showStatus) {
-            window.app.showStatus(ruleName ? `已加载规则 ${ruleName} 的 ROI` : '已加载全局 ROI');
+            window.app.showStatus(ruleName ? roiTr('config.ruleLoadedRoi', { name: ruleName }) : roiTr('config.globalLoadedRoi'));
         }
     }
 }

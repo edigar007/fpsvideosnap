@@ -41,6 +41,9 @@ class VideoJoiner:
         self.pre_normalize_clips = bool(self.join_fix_cfg.get("pre_normalize_clips", True))
         self.keep_intermediates = bool(self.join_fix_cfg.get("keep_intermediates", False))
         self.safe_preset = self.join_fix_cfg.get("safe_preset", "medium")
+        self.xfade_segment_size = self._parse_xfade_segment_size(
+            self.join_fix_cfg.get("xfade_segment_size", 4)
+        )
         self.output_preset = "p4" if self.encoder == "h264_nvenc" else "medium"
         self.safe_crf = str(self.join_fix_cfg.get("safe_crf", 18))
         self.safe_audio_rate = str(self.join_fix_cfg.get("safe_audio_rate", 48000))
@@ -178,6 +181,20 @@ class VideoJoiner:
             # 使用xfade转场（可能有花屏问题）
             return self._join_with_xfade(clip_paths, output_path)
 
+    def _parse_xfade_segment_size(self, value: Any) -> int:
+        try:
+            segment_size = int(value)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid xfade_segment_size {value!r}; using 4.")
+            return 4
+
+        if segment_size <= 0:
+            return 0
+        if segment_size < 2:
+            logger.warning("xfade_segment_size must be at least 2; using 2.")
+            return 2
+        return segment_size
+
     def _build_normalized_input_filters(self, clip_count: int) -> Tuple[List[str], List[str], List[str]]:
         """Normalize each input stream to a safe, uniform format before joining."""
         filter_parts = []
@@ -232,6 +249,56 @@ class VideoJoiner:
 
     def _join_with_xfade(self, clip_paths: List[str], output_path: str) -> bool:
         """Uses FFmpeg xfade filter to join clips with transitions."""
+        if self.xfade_segment_size and len(clip_paths) > self.xfade_segment_size:
+            return self._join_with_segmented_xfade(clip_paths, output_path)
+
+        return self._join_with_xfade_command(clip_paths, output_path)
+
+    def _join_with_segmented_xfade(self, clip_paths: List[str], output_path: str) -> bool:
+        """Join large xfade chains in smaller passes to cap FFmpeg filter memory."""
+        temp_root = self.config.get("global", {}).get("temp_dir", "temp")
+        os.makedirs(temp_root, exist_ok=True)
+        segment_dir = tempfile.mkdtemp(prefix="xfade_segments_", dir=temp_root)
+        segment_paths = []
+
+        try:
+            chunks = [
+                clip_paths[index:index + self.xfade_segment_size]
+                for index in range(0, len(clip_paths), self.xfade_segment_size)
+            ]
+            logger.info(
+                "Joining %s clips in %s xfade segments of up to %s inputs.",
+                len(clip_paths),
+                len(chunks),
+                self.xfade_segment_size,
+            )
+
+            for index, chunk in enumerate(chunks, start=1):
+                segment_path = os.path.join(segment_dir, f"xfade_segment_{index:03d}.mp4")
+                logger.info(
+                    "Joining xfade segment %s/%s with %s clips...",
+                    index,
+                    len(chunks),
+                    len(chunk),
+                )
+
+                if len(chunk) == 1:
+                    success = self._copy_single_clip(chunk[0], segment_path)
+                else:
+                    success = self._join_with_xfade_command(chunk, segment_path)
+
+                if not success:
+                    logger.error(f"Failed to join xfade segment {index}/{len(chunks)}.")
+                    return False
+                segment_paths.append(segment_path)
+
+            return self._join_with_xfade(segment_paths, output_path)
+        finally:
+            if not self.keep_intermediates:
+                shutil.rmtree(segment_dir, ignore_errors=True)
+
+    def _join_with_xfade_command(self, clip_paths: List[str], output_path: str) -> bool:
+        """Run one FFmpeg xfade command for a bounded number of inputs."""
         durations = []
         for path in clip_paths:
             try:

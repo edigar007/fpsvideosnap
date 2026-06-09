@@ -1,95 +1,136 @@
-# FPS Video Snap 🎮🚀
+# FPS Video Snap
 
-**FPS Video Snap** 是一款基于 AI 视觉识别的自动化游戏精彩集锦生成器。它能够自动检测 FPS 游戏视频中的击杀画面，智能提取片段，并自动拼接生成带有背景音乐和转场效果的高质量集锦视频。
+AI-assisted highlight generation for FPS gameplay videos.
+
+FPS Video Snap is a local Windows tool that detects kill moments in gameplay footage, cuts highlight clips, and optionally joins them with transitions and background music. Detection is config-driven and combines fast color prefiltering, OpenCV template matching, optional PaddleOCR, and YOLO-backed inference.
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![YOLOv8](https://img.shields.io/badge/AI-YOLOv8-green.svg)](https://github.com/ultralytics/ultralytics)
 [![FFmpeg](https://img.shields.io/badge/Video-FFmpeg-orange.svg)](https://ffmpeg.org/)
 [![CUDA Ready](https://img.shields.io/badge/GPU-CUDA-76b900.svg)](https://developer.nvidia.com/cuda-zone)
 
----
+## Features
 
-## ✨ 核心特性
+- Multi-signal kill detection: color prefiltering, template matching, OCR, and YOLO signal fusion.
+- Game-specific YAML configs for ROIs, colors, templates, thresholds, and rules.
+- Local web Config Assistant for tuning ROIs, templates, colors, OCR keywords, and OR-of-AND detection rules.
+- Batch Dashboard for scanning video folders and running multiple videos with live progress.
+- FFmpeg-based frame extraction, clip cutting, joining, transitions, and audio mixing.
+- Checkpoint/resume support for long-running jobs.
+- Windows/NVIDIA GPU path with CUDA, NVENC, and optional PaddleOCR isolation.
 
-- **AI 智能识别 (Enhanced Detection System)**: 采用 **多信号融合 (Multi-signal Fusion)** 架构，整合 OCR (PaddleOCR)、模板匹配 (OpenCV) 和 YOLOv8-nano 模型。
-- **高性能处理**: 深度优化 NVIDIA GPU 加速（如 4070 Ti Super），支持批量帧推理与分阶段流水线。
-- **分阶段检测**:
-  - **Prefilter**: 基于颜色统计的高效预过滤，极大地降低计算消耗。
-  - **Precise Detect**: 融合文字识别、图像特征、YOLO 对象检测多维度验证。
-- **可视化调试**: 提供 `--debug-visual` 标志，实时保存检测 ROI、识别文本、模板匹配热图等调试信息。
-- **自动剪辑**: 根据识别的时间点自动提取前置录像、击杀瞬间及后续反馈。
-- **连杀检测**: 自动识别并合并连续击杀（双杀、三连杀等）片段。
-- **精美输出**: 自动随机应用多种转场效果（淡入淡出、闪白等）并混缩背景音乐。
-- **配置驱动**: 通过 YAML 轻松扩展对不同游戏（如《战地6》）的支持。
+## Requirements
 
-## 🛠️ 快速开始
+- Windows 10/11
+- Python 3.10+
+- FFmpeg and FFprobe available on `PATH`
+- NVIDIA GPU with CUDA support recommended
+- Local model files under `models/`
 
-### 前提条件
-- **OS**: Windows 10/11
-- **Python**: 3.10+
-- **GPU**: NVIDIA GPU (支持 CUDA)
-- **FFmpeg**: 系统环境变量中需包含 `ffmpeg`
+The project is designed to run offline. Network access is not required during normal processing. Model download is only expected during initial setup when explicitly enabled.
 
-### 安装
-1. 克隆/下载本仓库。
-2. 运行安装脚本：
-   ```bash
-   scripts\setup.bat
-   ```
+## Quick Start
 
-### 使用示例
-处理一个《战地6》的游戏视频：
-```bash
-.venv\Scripts\python.exe main.py --video path/to/gameplay.mp4 --game battlefield6
+Create or use the project virtual environment, then install dependencies:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-开启调试模式与可视化：
-```bash
+Check CUDA availability:
+
+```powershell
+.venv\Scripts\python.exe -c "import torch; print(torch.cuda.is_available())"
+```
+
+Process one video:
+
+```powershell
+.venv\Scripts\python.exe main.py --video input.mp4 --game battlefield6
+```
+
+Run with debug output and visual overlays:
+
+```powershell
 .venv\Scripts\python.exe main.py --video sample.mp4 --game battlefield6 --debug --debug-visual
 ```
 
-## ⚙️ Config Assistant 配置助手
+Process multiple videos as one highlight set:
 
-Config Assistant 是一个本地 Web 配置工具，用来用截图交互式调整游戏识别参数，而不是手工反复编辑 YAML。
+```powershell
+.venv\Scripts\python.exe main.py --video video1.mp4 video2.mp4 --game battlefield_1
+```
 
-启动方式：
-```bash
+## Web Tools
+
+Start the Config Assistant:
+
+```powershell
 .venv\Scripts\python.exe main.py config-assistant --port 8080
 ```
 
-主要功能：
-- **游戏配置管理**：读取现有游戏配置，也可以基于 `config/default_game_template.yaml` 快速创建新游戏配置。
-- **ROI 区域标定**：上传游戏截图后，在画布上框选击杀信息区域，实时查看归一化坐标和区域预览，并保存到配置。
-- **OCR 关键词调试**：对当前 ROI 直接执行 OCR，查看识别结果，一键把识别到的文字加入关键词列表，并调整匹配阈值。
-- **模板匹配配置**：从截图中裁剪图标模板，写入模板路径和阈值，适合没有稳定文字但有固定 UI 图标的游戏。
-- **颜色采样与预览**：从截图中取样颜色，自动生成 HSV 范围和容差，并预览颜色掩码效果。
-- **规则编辑**：配置 `detection.rules` 的 OR-of-AND 逻辑，组合 `ocr`、`template`、`color`、`yolo` 等信号，并切换编辑全局配置或某条规则的 `detection_overrides`。
-- **实时 YAML 预览与导出**：右下角实时预览当前 YAML，完成后可直接导出配置文件。
+Start the batch Dashboard:
 
-补充说明：
-- Config Assistant 默认只监听本机 `127.0.0.1`，启动后会自动打开浏览器。
-- OCR 预览功能依赖本地 OCR 环境；如果 PaddleOCR 初始化失败，ROI、模板、颜色、规则等非 OCR 功能仍可正常使用。
+```powershell
+.venv\Scripts\python.exe main.py dashboard --port 8081
+```
 
-## 📂 项目结构
+Both web tools are intended for trusted local use and should stay bound to `127.0.0.1`.
 
-- `config/`: 游戏识别参数与全局配置。
-- `models/`: YOLOv8 模型文件。
-- `src/`: 核心源代码（AI、视频处理、音频混缩）。
-- `output/`: 生成的集锦视频和处理报告。
-- `docs/`: 详细的使用与开发文档。
+## Game Configuration
 
-## 📖 详细文档
+Game configs live in `config/games/*.yaml`. Detection settings should stay config-driven: ROIs, color thresholds, template paths, OCR keywords, confidence thresholds, and detection rules belong in YAML rather than hardcoded Python.
 
-- [安装指南 (INSTALL.md)](docs/INSTALL.md)
-- [配置说明 (CONFIG.md)](docs/CONFIG.md)
-- [故障排除 (TROUBLESHOOTING.md)](docs/TROUBLESHOOTING.md)
+Example game configs:
 
----
+- `config/games/battlefield6.yaml`
+- `config/games/battlefield4.yaml`
+- `config/games/battlefield_1.yaml`
 
-## ⚖️ 许可
+Validate a config:
 
-本项目仅供学习和研究使用。
+```powershell
+.venv\Scripts\python.exe main.py validate-config --game battlefield_1
+```
 
-## 🤝 贡献
+## Project Layout
 
-欢迎提交 Issue 或 Pull Request 来完善本项目！
+```text
+config/      Global and game-specific YAML configs
+docs/        User, troubleshooting, review, and engineering notes
+models/      YOLO models and template images
+src/ai/      Detection, signal extraction, fusion, OCR, and rules
+src/audio/   Audio processing and mixing
+src/clip/    Highlight clip extraction and metadata
+src/pipeline/Processing stages, checkpoints, and orchestration
+src/tools/   Config Assistant and Dashboard web tools
+src/video/   FFmpeg frame extraction, cutting, joining, and transitions
+tests/       Pytest unit and integration tests
+```
+
+## Tests
+
+Run the full suite:
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/
+```
+
+Run focused web-tool tests:
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/test_config_assistant_api.py tests/test_dashboard_api.py -q
+```
+
+## Documentation
+
+- Chinese README: [README.zh-CN.md](README.zh-CN.md)
+- Installation: [docs/INSTALL.md](docs/INSTALL.md)
+- Configuration: [docs/CONFIG.md](docs/CONFIG.md)
+- Config Assistant guide: [docs/config-assistant-guide.md](docs/config-assistant-guide.md)
+- Troubleshooting: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- Known limitations: [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md)
+
+## License
+
+This project is for learning and research use.

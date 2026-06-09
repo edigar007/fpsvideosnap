@@ -1,170 +1,163 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FPS Video Snap - 剪辑控制台</title>
+    <title>FPS Video Snap - Dashboard</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
+<body data-i18n-title="dashboard.title">
     <div class="app-container">
-        <!-- Header Section -->
         <header class="cyber-header">
             <div class="logo-area">
-                <span class="icon">🎮</span>
-                <h1>FPS Video Snap <span class="badge">PRO</span></h1>
+                <span class="icon">FPS</span>
+                <h1>FPS Video Snap <span class="badge" data-i18n="dashboard.pro">PRO</span></h1>
             </div>
-            <div class="status-indicator" id="globalStatus">
-                <span class="status-dot"></span>
-                <span class="status-text">系统就绪</span>
+            <div class="header-actions">
+                <label class="language-control">
+                    <span data-i18n="language.label">Language</span>
+                    <select id="language-selector" class="language-selector" data-i18n-language-select></select>
+                </label>
+                <div class="status-indicator" id="globalStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text" data-i18n="dashboard.ready">System ready</span>
+                </div>
             </div>
         </header>
 
-        <!-- Main Grid -->
         <main class="control-grid">
-            <!-- Left Column: Controls -->
             <section class="panel control-panel">
                 <div class="panel-header">
-                    <h2>配置与源文件</h2>
+                    <h2 data-i18n="dashboard.configSources">Config and sources</h2>
                 </div>
-                
+
                 <div class="panel-body">
-                    <!-- Game Selection -->
                     <div class="form-group">
-                        <label for="gameSelect">目标游戏</label>
+                        <label for="gameSelect" data-i18n="dashboard.targetGame">Target game</label>
                         <div class="select-wrapper">
                             <select id="gameSelect">
-                                <option value="" disabled selected>加载中...</option>
+                                <option value="" disabled selected data-i18n="dashboard.loading">Loading...</option>
                             </select>
                         </div>
                     </div>
 
-                    <!-- Directory Scan -->
                     <div class="form-group">
-                        <label for="dirInput">视频目录</label>
+                        <label for="dirInput" data-i18n="dashboard.videoDirectory">Video directory</label>
                         <div class="input-group">
-                            <input type="text" id="dirInput" placeholder="例如: D:\Videos\Battlefield 2042" value="D:\videos">
+                            <input type="text" id="dirInput" data-i18n-placeholder="dashboard.directoryPlaceholder" placeholder="Example: D:\Videos\Battlefield 2042" value="D:\videos">
                             <button id="scanBtn" class="btn btn-secondary">
-                                <span class="icon">🔍</span> 扫描
+                                <span class="icon">Scan</span> <span data-i18n="dashboard.scan">Scan</span>
                             </button>
                         </div>
                     </div>
 
-                    <!-- Video List -->
                     <div class="video-list-section">
                         <div class="list-header">
                             <label class="checkbox-wrapper">
                                 <input type="checkbox" id="selectAll">
                                 <span class="checkmark"></span>
-                                全选
+                                <span data-i18n="dashboard.selectAll">Select all</span>
                             </label>
-                            <span class="counter" id="fileCount">0 个文件</span>
+                            <span class="counter" id="fileCount">0 files</span>
                         </div>
                         <div class="video-list-container" id="videoList">
                             <div class="empty-state">
-                                <span>请扫描目录以查找视频文件</span>
+                                <span data-i18n="dashboard.emptyScan">Scan a directory to find video files</span>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Actions -->
                     <div class="action-bar">
                         <div class="selection-info">
-                            已选: <strong id="selectedCount" class="highlight-text">0</strong>
+                            <span data-i18n="dashboard.selected">Selected</span>
+                            <strong id="selectedCount" class="highlight-text">0</strong>
                         </div>
                         <button id="startBtn" class="btn btn-primary" disabled>
-                            ▶️ 开始剪辑
+                            <span data-i18n="dashboard.start">Start clipping</span>
                         </button>
                     </div>
                 </div>
             </section>
 
-            <!-- Right Column: Progress & Errors -->
             <section class="panel progress-panel">
                 <div class="panel-header">
-                    <h2>📊 处理进度</h2>
+                    <h2 data-i18n="dashboard.progress">Processing progress</h2>
                 </div>
-                
-                <!-- Progress Display -->
+
                 <div class="progress-content" id="progressContent">
-                    <!-- Current Video Info -->
                     <div class="current-video-info" id="currentVideoInfo">
-                        <div class="video-label">等待开始...</div>
+                        <div class="video-label" data-i18n="dashboard.waiting">Waiting to start...</div>
                     </div>
-                    
-                    <!-- Stage List -->
+
                     <div class="stage-list" id="stageList">
                         <div class="stage-item" data-stage="metadata">
-                            <span class="stage-icon">⬜</span>
-                            <span class="stage-name">视频元数据</span>
+                            <span class="stage-icon">-</span>
+                            <span class="stage-name" data-i18n="dashboard.metadata">Video metadata</span>
                         </div>
                         <div class="stage-item" data-stage="frames">
-                            <span class="stage-icon">⬜</span>
-                            <span class="stage-name">帧提取</span>
+                            <span class="stage-icon">-</span>
+                            <span class="stage-name" data-i18n="dashboard.frames">Frame extraction</span>
                         </div>
                         <div class="stage-item" data-stage="detection">
-                            <span class="stage-icon">⬜</span>
-                            <span class="stage-name">击杀检测</span>
+                            <span class="stage-icon">-</span>
+                            <span class="stage-name" data-i18n="dashboard.detection">Kill detection</span>
                             <div class="stage-progress-bar">
                                 <div class="stage-progress-fill" id="detectionProgressFill"></div>
                             </div>
                             <span class="stage-detail" id="detectionDetail"></span>
                         </div>
                         <div class="stage-item" data-stage="clips">
-                            <span class="stage-icon">⬜</span>
-                            <span class="stage-name">片段提取</span>
+                            <span class="stage-icon">-</span>
+                            <span class="stage-name" data-i18n="dashboard.clips">Clip extraction</span>
                         </div>
                         <div class="stage-item" data-stage="join">
-                            <span class="stage-icon">⬜</span>
-                            <span class="stage-name">视频拼接</span>
+                            <span class="stage-icon">-</span>
+                            <span class="stage-name" data-i18n="dashboard.join">Video joining</span>
                         </div>
                         <div class="stage-item" data-stage="audio">
-                            <span class="stage-icon">⬜</span>
-                            <span class="stage-name">音频混合</span>
+                            <span class="stage-icon">-</span>
+                            <span class="stage-name" data-i18n="dashboard.audio">Audio mixing</span>
                         </div>
                     </div>
-                    
-                    <!-- Stats -->
+
                     <div class="stats-row">
                         <div class="stat-item">
                             <span class="stat-value" id="killCount">0</span>
-                            <span class="stat-label">检测到的击杀</span>
+                            <span class="stat-label" data-i18n="dashboard.detectedKills">Detected kills</span>
                         </div>
                         <div class="stat-item">
                             <span class="stat-value" id="clipCount">0</span>
-                            <span class="stat-label">提取的片段</span>
+                            <span class="stat-label" data-i18n="dashboard.extractedClips">Extracted clips</span>
                         </div>
                     </div>
 
                     <div class="output-section hidden" id="outputSection">
-                        <div class="output-title">📁 生成文件位置</div>
+                        <div class="output-title" data-i18n="dashboard.outputFiles">Generated files</div>
                         <div class="output-list" id="outputList"></div>
                     </div>
                 </div>
-                
-                <!-- Error Log (collapsed by default, shows only errors) -->
+
                 <div class="error-section">
                     <div class="error-header" id="errorHeader">
-                        <span>⚠️ 错误日志</span>
+                        <span data-i18n="dashboard.errorLog">Error log</span>
                         <span class="error-count" id="errorCount">0</span>
                     </div>
-                    <div class="error-log" id="errorLog">
-                        <!-- Errors will appear here -->
-                    </div>
+                    <div class="error-log" id="errorLog"></div>
                 </div>
 
                 <div class="status-footer">
                     <div class="progress-info">
-                        <span id="taskStatusText">状态: 空闲</span>
+                        <span id="taskStatusText"><span data-i18n="dashboard.status">Status:</span> <span data-i18n="dashboard.idle">Idle</span></span>
                     </div>
                     <button id="cancelBtn" class="btn btn-danger hidden">
-                        🛑 取消任务
+                        <span data-i18n="dashboard.cancel">Cancel task</span>
                     </button>
                 </div>
             </section>
         </main>
     </div>
 
+    <script src="js/i18n.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

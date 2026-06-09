@@ -1,4 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
+    const tr = (key, params = {}) => window.i18n ? window.i18n.t(key, params) : key;
     // State
     const state = {
         games: [],
@@ -11,12 +12,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Stage configuration
     const STAGES = [
-        { id: 'metadata', name: '视频元数据' },
-        { id: 'frames', name: '帧提取' },
-        { id: 'detection', name: '击杀检测' },
-        { id: 'clips', name: '片段提取' },
-        { id: 'join', name: '视频拼接' },
-        { id: 'audio', name: '音频混合' }
+        { id: 'metadata', key: 'dashboard.metadata' },
+        { id: 'frames', key: 'dashboard.frames' },
+        { id: 'detection', key: 'dashboard.detection' },
+        { id: 'clips', key: 'dashboard.clips' },
+        { id: 'join', key: 'dashboard.join' },
+        { id: 'audio', key: 'dashboard.audio' }
     ];
 
     // DOM Elements
@@ -56,6 +57,10 @@ document.addEventListener('DOMContentLoaded', () => {
         setupEventListeners();
         checkTaskStatus();
         startStatusPolling();
+        document.addEventListener('languageChanged', () => {
+            setTaskStatus(state.taskStatus);
+            elements.fileCount.textContent = tr('dashboard.fileCount', { count: state.videos.length });
+        });
     }
 
     function setupEventListeners() {
@@ -99,24 +104,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             } else {
                 const option = document.createElement('option');
-                option.textContent = "未找到游戏配置";
+                option.textContent = tr('dashboard.noGames');
                 elements.gameSelect.appendChild(option);
             }
         } catch (error) {
             console.error('Failed to fetch games:', error);
-            showToast('无法加载游戏列表', 'error');
+            showToast(tr('dashboard.loadGamesFailed'), 'error');
         }
     }
 
     async function scanDirectory() {
         const directory = elements.dirInput.value.trim();
         if (!directory) {
-            showToast('请输入视频目录', 'warning');
+            showToast(tr('dashboard.directoryRequired'), 'warning');
             return;
         }
 
         elements.scanBtn.disabled = true;
-        elements.scanBtn.innerHTML = '<span class="icon">⏳</span> 扫描中...';
+        elements.scanBtn.innerHTML = `<span class="icon">...</span> ${tr('dashboard.scanning')}`;
 
         try {
             const response = await fetch('/api/scan', {
@@ -136,10 +141,10 @@ document.addEventListener('DOMContentLoaded', () => {
             
         } catch (error) {
             console.error('Scan failed:', error);
-            showToast('扫描目录失败', 'error');
+            showToast(tr('dashboard.scanFailed'), 'error');
         } finally {
             elements.scanBtn.disabled = false;
-            elements.scanBtn.innerHTML = '<span class="icon">🔍</span> 扫描';
+            elements.scanBtn.innerHTML = `<span class="icon">Scan</span> ${tr('dashboard.scan')}`;
         }
     }
 
@@ -166,29 +171,29 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             
             if (data.success) {
-                showToast('任务已启动', 'success');
+                showToast(tr('dashboard.taskStarted'), 'success');
             } else {
                 setTaskStatus('failed');
-                showToast('启动失败: ' + (data.error || '未知错误'), 'error');
+                showToast(tr('dashboard.startFailed', { error: data.error || 'Unknown error' }), 'error');
             }
         } catch (error) {
             setTaskStatus('failed');
-            showToast('启动请求失败', 'error');
+            showToast(tr('dashboard.startRequestFailed'), 'error');
         }
     }
 
     async function cancelTask() {
-        if (!confirm('确定要取消当前任务吗？')) return;
+        if (!confirm(tr('dashboard.cancelConfirm'))) return;
         
         try {
             const response = await fetch('/api/task/cancel', { method: 'POST' });
             const data = await response.json();
             
             if (data.success) {
-                showToast('任务已取消', 'warning');
+                showToast(tr('dashboard.taskCancelled'), 'warning');
             }
         } catch (error) {
-            showToast('取消请求失败', 'error');
+            showToast(tr('dashboard.cancelFailed'), 'error');
         }
     }
 
@@ -247,7 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.videos.length === 0) {
             elements.videoList.innerHTML = `
                 <div class="empty-state">
-                    <span>未找到视频文件 (.mp4, .mkv, .avi)</span>
+                    <span>${escapeHtml(tr('dashboard.noVideos'))}</span>
                 </div>`;
             updateSelectionUI();
             return;
@@ -297,7 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.videoList.appendChild(item);
         });
 
-        elements.fileCount.textContent = `${state.videos.length} 个文件`;
+        elements.fileCount.textContent = tr('dashboard.fileCount', { count: state.videos.length });
         updateSelectionUI();
     }
 
@@ -329,29 +334,29 @@ document.addEventListener('DOMContentLoaded', () => {
         elements.selectAll.disabled = isRunning;
 
         const statusMap = {
-            'idle': { text: '空闲', color: '#94a3b8' },
-            'running': { text: '⏳ 处理中...', color: '#00d9ff' },
-            'completed': { text: '✅ 已完成', color: '#4ade80' },
-            'failed': { text: '❌ 失败', color: '#f87171' },
-            'cancelled': { text: '⚠️ 已取消', color: '#fbbf24' }
+            'idle': { text: tr('dashboard.idle'), color: '#94a3b8' },
+            'running': { text: tr('dashboard.running'), color: '#00d9ff' },
+            'completed': { text: tr('dashboard.completed'), color: '#4ade80' },
+            'failed': { text: tr('dashboard.failed'), color: '#f87171' },
+            'cancelled': { text: tr('dashboard.cancelled'), color: '#fbbf24' }
         };
         
         const info = statusMap[status] || statusMap['idle'];
-        elements.taskStatusText.innerHTML = `状态: <span style="color:${info.color}">${info.text}</span>`;
+        elements.taskStatusText.innerHTML = `${escapeHtml(tr('dashboard.status'))} <span style="color:${info.color}">${escapeHtml(info.text)}</span>`;
         
         elements.statusDot.style.backgroundColor = info.color;
         elements.statusDot.style.boxShadow = `0 0 8px ${info.color}`;
-        elements.statusText.textContent = isRunning ? '系统忙碌' : '系统就绪';
+        elements.statusText.textContent = isRunning ? tr('dashboard.busy') : tr('dashboard.ready');
     }
 
     function resetProgressDisplay() {
-        elements.currentVideoInfo.innerHTML = '<div class="video-label">准备中...</div>';
+        elements.currentVideoInfo.innerHTML = `<div class="video-label">${escapeHtml(tr('dashboard.preparing'))}</div>`;
         
         STAGES.forEach(stage => {
             const el = document.querySelector(`.stage-item[data-stage="${stage.id}"]`);
             if (el) {
                 el.className = 'stage-item';
-                el.querySelector('.stage-icon').textContent = '⬜';
+                el.querySelector('.stage-icon').textContent = '-';
             }
         });
         
@@ -381,11 +386,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const status = stages[stage.id] || 'pending';
             el.className = `stage-item ${status}`;
             
-            let icon = '⬜';
-            if (status === 'success') icon = '✅';
-            else if (status === 'running') icon = '⏳';
-            else if (status === 'failed') icon = '❌';
-            else if (status === 'skipped') icon = '⏭️';
+            let icon = '-';
+            if (status === 'success') icon = 'OK';
+            else if (status === 'running') icon = '...';
+            else if (status === 'failed') icon = 'X';
+            else if (status === 'skipped') icon = 'SKIP';
             
             el.querySelector('.stage-icon').textContent = icon;
         });
@@ -421,7 +426,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const title = document.createElement('div');
             title.className = 'output-name';
-            title.textContent = file.label || file.name || '生成文件';
+            title.textContent = file.label || file.name || tr('dashboard.generatedFile');
 
             const path = document.createElement('div');
             path.className = 'output-path';
@@ -436,7 +441,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const copyBtn = document.createElement('button');
             copyBtn.className = 'btn btn-secondary btn-xs';
-            copyBtn.textContent = '复制路径';
+            copyBtn.textContent = tr('dashboard.copyPath');
             copyBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 copyOutputPath(file.path || '');
@@ -508,7 +513,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             await navigator.clipboard.writeText(path);
-            showToast('已复制生成文件路径', 'success');
+            showToast(tr('dashboard.pathCopied'), 'success');
         } catch (error) {
             console.warn('Clipboard copy failed:', error);
             showToast(path, 'info');

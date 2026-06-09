@@ -226,6 +226,62 @@ def test_video_joiner_complex_filter_logic(mock_popen, mock_info):
 
 
 @patch("src.video.video_joiner.VideoInfo")
+@patch("subprocess.Popen")
+def test_video_joiner_segments_long_xfade_chain(mock_popen, mock_info, tmp_path):
+    mock_instance = MagicMock()
+    mock_instance.duration = 10.0
+    mock_info.return_value = mock_instance
+
+    mock_process = MagicMock()
+    mock_process.communicate.return_value = (b"", b"")
+    mock_process.returncode = 0
+    mock_popen.return_value = mock_process
+
+    config = {
+        "global": {"temp_dir": str(tmp_path)},
+        "video": {
+            "ffmpeg_path": "ffmpeg",
+            "encoder": "h264_nvenc",
+            "fps": 60,
+            "bitrate": "20M",
+            "hwaccel": "cuda",
+            "join_fix": {
+                "pre_normalize_clips": False,
+                "keep_intermediates": True,
+                "safe_audio_rate": 48000,
+                "safe_channel_layout": "stereo",
+                "xfade_segment_size": 3,
+            },
+        },
+        "highlights": {
+            "transition_type": "fade",
+            "transition_duration": 0.5
+        }
+    }
+
+    joiner = VideoJoiner(config)
+    clips = [f"c{i}.mp4" for i in range(1, 7)]
+
+    with patch.object(joiner, "_any_clip_missing_audio", return_value=False):
+        success = joiner.join_clips(clips, "out.mp4")
+
+    assert success
+    assert mock_popen.call_count == 3
+
+    first_cmd = " ".join(mock_popen.call_args_list[0].args[0])
+    second_cmd = " ".join(mock_popen.call_args_list[1].args[0])
+    final_cmd = " ".join(mock_popen.call_args_list[2].args[0])
+
+    assert "-i c1.mp4" in first_cmd
+    assert "-i c3.mp4" in first_cmd
+    assert "-i c4.mp4" in second_cmd
+    assert "-i c6.mp4" in second_cmd
+    assert "xfade_segment_001.mp4" in final_cmd
+    assert "xfade_segment_002.mp4" in final_cmd
+    assert final_cmd.endswith(" out.mp4")
+
+
+@patch("src.video.video_joiner.VideoInfo")
 def test_video_joiner_duration_reading_via_property(mock_info):
     config = {
         "video": {

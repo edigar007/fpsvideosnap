@@ -445,6 +445,34 @@ body {
     color: var(--text-muted);
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.language-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
+.language-selector {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    color: #fff;
+    border-radius: var(--radius);
+    padding: 0.45rem 0.6rem;
+    outline: none;
+}
+
+.language-selector:focus {
+    border-color: var(--accent);
+}
+
 /* Output Files */
 .output-section {
     background: rgba(74, 222, 128, 0.08);

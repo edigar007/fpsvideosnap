@@ -1,3 +1,5 @@
+const rulesTr = (key, params = {}) => window.i18n ? window.i18n.t(key, params) : key;
+
 /**
  * Rules Tab Logic
  * Manages OR-of-AND detection rules configuration.
@@ -17,10 +19,10 @@ class RulesTab {
         // Valid signal types
         this.validSignals = ['ocr', 'template', 'color', 'yolo'];
         this.signalLabels = {
-            'ocr': 'OCR 文字匹配',
-            'template': '模板匹配',
-            'color': '颜色检测',
-            'yolo': 'YOLO 检测'
+            'ocr': 'config.signal.ocr',
+            'template': 'config.signal.template',
+            'color': 'config.signal.color',
+            'yolo': 'config.signal.yolo'
         };
         
         this.init();
@@ -41,6 +43,8 @@ class RulesTab {
                 this.render();
             }
         });
+
+        document.addEventListener('languageChanged', () => this.render());
     }
 
     /**
@@ -89,7 +93,7 @@ class RulesTab {
      */
     removeRule(index) {
         const deletedRuleName = this.rules[index].name;
-        if (confirm(`确定删除规则 "${deletedRuleName}"？`)) {
+        if (confirm(rulesTr('config.deleteRuleConfirm', { name: deletedRuleName }))) {
             this.rules.splice(index, 1);
             
             // If deleted rule was selected, update selection
@@ -144,8 +148,8 @@ class RulesTab {
                 <div class="rule-header" style="cursor: pointer;">
                     <div class="rule-name-row">
                         <i class="fas fa-globe"></i> 
-                        <span style="font-weight: bold; margin-left: 8px;">全局默认配置</span>
-                        ${!this.selectedRuleName ? '<span class="status-badge" style="margin-left: auto;">当前编辑</span>' : ''}
+                        <span style="font-weight: bold; margin-left: 8px;">${rulesTr('config.globalDefault')}</span>
+                        ${!this.selectedRuleName ? `<span class="status-badge" style="margin-left: auto;">${rulesTr('config.current')}</span>` : ''}
                     </div>
                 </div>
             `;
@@ -154,7 +158,7 @@ class RulesTab {
         }
         
         if (this.rules.length === 0) {
-            this.rulesList.innerHTML = '<div class="empty-state">尚未配置规则，将使用默认加权计算</div>';
+            this.rulesList.innerHTML = `<div class="empty-state">${rulesTr('config.noRules')}</div>`;
             return;
         }
         
@@ -168,26 +172,26 @@ class RulesTab {
                     <div class="rule-name-row">
                         <div class="rule-select-area" style="flex: 1; display: flex; align-items: center; cursor: pointer;">
                             <input type="text" class="rule-name-input" value="${this.escapeHtml(rule.name)}" 
-                                   placeholder="规则名称" title="规则名称">
-                            ${this.selectedRuleName === rule.name ? '<span class="status-badge" style="margin-left: 10px;">当前编辑</span>' : ''}
+                                   placeholder="${rulesTr('config.ruleName')}" title="${rulesTr('config.ruleName')}">
+                            ${this.selectedRuleName === rule.name ? `<span class="status-badge" style="margin-left: 10px;">${rulesTr('config.current')}</span>` : ''}
                         </div>
                         <label class="toggle small">
                             <input type="checkbox" class="rule-enabled" ${rule.enabled ? 'checked' : ''}>
                             <span class="slider"></span>
                         </label>
-                        <button class="btn-icon delete-rule" title="删除规则">
+                        <button class="btn-icon delete-rule" title="${rulesTr('config.deleteRuleTitle')}">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
                 </div>
                 <div class="rule-signals">
-                    <label>条件 (AND):</label>
+                    <label>${rulesTr('config.ruleConditions')}</label>
                     <div class="signal-checkboxes">
                         ${this.validSignals.map(sig => `
                             <label class="signal-checkbox">
                                 <input type="checkbox" data-signal="${sig}" 
                                        ${rule.require.includes(sig) ? 'checked' : ''}>
-                                <span>${this.signalLabels[sig]}</span>
+                                <span>${rulesTr(this.signalLabels[sig])}</span>
                             </label>
                         `).join('')}
                     </div>
@@ -246,16 +250,16 @@ class RulesTab {
         this.rules.forEach((rule, i) => {
             // Check name
             if (!rule.name || !rule.name.trim()) {
-                errors.push(`规则 ${i + 1}: 名称不能为空`);
+                errors.push(rulesTr('config.ruleEmptyName', { index: i + 1 }));
             } else if (seenNames.has(rule.name)) {
-                errors.push(`规则 ${i + 1}: 名称 "${rule.name}" 重复`);
+                errors.push(rulesTr('config.ruleDuplicateName', { index: i + 1, name: rule.name }));
             } else {
                 seenNames.add(rule.name);
             }
             
             // Check require
             if (!rule.require || rule.require.length === 0) {
-                errors.push(`规则 "${rule.name}": 至少需要一个条件`);
+                errors.push(rulesTr('config.ruleNeedsCondition', { name: rule.name }));
             }
         });
         
@@ -268,14 +272,14 @@ class RulesTab {
     async saveRules() {
         const game = document.getElementById('game-selector').value;
         if (!game) {
-            alert('请先选择游戏');
+            alert(rulesTr('config.selectGameFirst'));
             return;
         }
         
         // Client-side validation
         const errors = this.validate();
         if (errors.length > 0) {
-            alert('配置错误:\n' + errors.join('\n'));
+            alert(rulesTr('config.configErrors', { errors: errors.join('\n') }));
             return;
         }
         
@@ -289,9 +293,9 @@ class RulesTab {
             if (response.ok) {
                 const data = await response.json();
                 if (window.app && window.app.showStatus) {
-                    window.app.showStatus('规则配置已保存', 'success');
+                    window.app.showStatus(rulesTr('config.rulesSaved'), 'success');
                 } else {
-                    alert('规则配置已保存');
+                    alert(rulesTr('config.rulesSaved'));
                 }
                 
                 // Update config preview
@@ -300,11 +304,11 @@ class RulesTab {
                 }
             } else {
                 const errorData = await response.json();
-                alert(`保存失败: ${errorData.error || '未知错误'}`);
+                alert(rulesTr('config.saveFailed', { error: errorData.error || rulesTr('config.unknownError') }));
             }
         } catch (err) {
             console.error('Save Rules Error:', err);
-            alert('网络错误');
+            alert(rulesTr('config.networkError'));
         }
     }
 

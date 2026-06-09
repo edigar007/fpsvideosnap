@@ -1,118 +1,115 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FPS Video Snap - Config Assistant v2.0</title>
-    
-    <!-- Styles -->
     <link rel="stylesheet" href="/static/vendor/icons.css">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
-<body class="dark-theme">
+<body class="dark-theme" data-i18n-title="config.title">
     <div class="app-layout">
-        <!-- Top Navigation Bar -->
         <header class="top-bar">
             <div class="brand">
                 <i class="fas fa-bolt-lightning logo"></i>
                 <div class="brand-text">
                     <h1>FPS Video Snap</h1>
-                    <span>Config Assistant v2.0</span>
+                    <span data-i18n="config.subtitle">Config Assistant v2.0</span>
                 </div>
             </div>
 
             <div class="top-bar-center">
                 <div class="game-control">
-                    <label for="game-selector">当前游戏:</label>
+                    <label for="game-selector" data-i18n="config.currentGame">Current game:</label>
                     <div class="select-wrapper">
                         <select id="game-selector">
-                            <option value="">正在加载...</option>
+                            <option value="" data-i18n="config.loading">Loading...</option>
                         </select>
                     </div>
-                    <button id="add-game-btn" class="icon-btn" title="新增游戏配置"><i class="fas fa-plus"></i></button>
+                    <button id="add-game-btn" class="icon-btn" data-i18n-title="config.addGameTitle" title="Add game config">
+                        <i class="fas fa-plus"></i>
+                    </button>
                 </div>
                 <div class="status-indicator">
-                    <span id="current-rule-indicator" class="status-badge rule-indicator" style="display: none; margin-right: 10px;">编辑全局配置</span>
-                    <span id="status-message" class="status-badge">准备就绪</span>
+                    <span id="current-rule-indicator" class="status-badge rule-indicator" style="display: none; margin-right: 10px;" data-i18n="config.globalConfig">Editing global config</span>
+                    <span id="status-message" class="status-badge" data-i18n="config.ready">Ready</span>
                 </div>
             </div>
 
             <div class="top-bar-actions">
+                <label class="language-control">
+                    <span data-i18n="language.label">Language</span>
+                    <select id="language-selector" class="language-selector" data-i18n-language-select></select>
+                </label>
                 <button id="upload-btn" class="btn secondary">
-                    <i class="fas fa-upload"></i> 上传参考图
+                    <i class="fas fa-upload"></i> <span data-i18n="config.upload">Upload reference image</span>
                 </button>
                 <button id="test-config-btn" class="btn secondary">
-                    <i class="fas fa-vial"></i> 测试配置
+                    <i class="fas fa-vial"></i> <span data-i18n="config.test">Test config</span>
                 </button>
                 <button id="download-config-btn" class="btn primary">
-                    <i class="fas fa-save"></i> 导出配置
+                    <i class="fas fa-save"></i> <span data-i18n="config.export">Export config</span>
                 </button>
             </div>
         </header>
 
         <main class="workspace">
-            <!-- Left Area: Canvas -->
             <section class="canvas-panel">
                 <div id="drop-zone" class="drop-hint">
                     <div class="hint-content">
                         <i class="fas fa-cloud-arrow-up"></i>
-                        <p>拖拽游戏截图到此处开始配置</p>
-                        <span>支持 PNG, JPG, BMP (推荐推荐 1080p/2k/4k 原图)</span>
+                        <p data-i18n="config.dropMain">Drop a gameplay screenshot here to start</p>
+                        <span data-i18n="config.dropSub">Supports PNG, JPG, and BMP. Original 1080p/2K/4K images are recommended.</span>
                     </div>
                 </div>
                 <div class="canvas-viewport" id="canvas-viewport">
                     <canvas id="main-canvas"></canvas>
                 </div>
-                
-                <!-- Floating Toolbar for Canvas -->
                 <div class="canvas-controls">
-                    <button id="zoom-in" title="放大"><i class="fas fa-plus"></i></button>
-                    <button id="zoom-out" title="缩小"><i class="fas fa-minus"></i></button>
-                    <button id="zoom-reset" title="重置缩放"><i class="fas fa-expand"></i></button>
+                    <button id="zoom-in" data-i18n-title="config.zoomIn" title="Zoom in"><i class="fas fa-plus"></i></button>
+                    <button id="zoom-out" data-i18n-title="config.zoomOut" title="Zoom out"><i class="fas fa-minus"></i></button>
+                    <button id="zoom-reset" data-i18n-title="config.zoomReset" title="Reset zoom"><i class="fas fa-expand"></i></button>
                     <div class="divider"></div>
-                    <button id="toggle-grid" title="显示网格"><i class="fas fa-border-all"></i></button>
+                    <button id="toggle-grid" data-i18n-title="config.grid" title="Show grid"><i class="fas fa-border-all"></i></button>
                 </div>
             </section>
 
-            <!-- Right Area: Tabs -->
             <aside class="config-tabs-panel">
                 <section id="config-test-panel" class="config-test-panel idle">
                     <div class="test-result-main">
                         <div>
-                            <div class="test-result-label">配置测试</div>
-                            <div id="test-result-summary" class="test-result-summary">上传图片后点击测试配置</div>
+                            <div class="test-result-label" data-i18n="config.testLabel">Config test</div>
+                            <div id="test-result-summary" class="test-result-summary" data-i18n="config.testSummaryIdle">Upload an image, then test the config</div>
                         </div>
-                        <div id="test-result-badge" class="test-result-badge">待测试</div>
+                        <div id="test-result-badge" class="test-result-badge" data-i18n="config.testBadgeIdle">Not tested</div>
                     </div>
                     <div id="test-result-details" class="test-result-details"></div>
                 </section>
 
                 <nav class="tabs-header">
                     <button class="tab-btn active" data-tab="roi">
-                        <i class="fas fa-vector-square"></i> 区域
+                        <i class="fas fa-vector-square"></i> <span data-i18n="config.tab.roi">Region</span>
                     </button>
                     <button class="tab-btn" data-tab="ocr">
-                        <i class="fas fa-font"></i> 文字
+                        <i class="fas fa-font"></i> <span data-i18n="config.tab.ocr">Text</span>
                     </button>
                     <button class="tab-btn" data-tab="templates">
-                        <i class="fas fa-clone"></i> 模板
+                        <i class="fas fa-clone"></i> <span data-i18n="config.tab.templates">Templates</span>
                     </button>
                     <button class="tab-btn" data-tab="colors">
-                        <i class="fas fa-palette"></i> 颜色
+                        <i class="fas fa-palette"></i> <span data-i18n="config.tab.colors">Colors</span>
                     </button>
                     <button class="tab-btn" data-tab="rules">
-                        <i class="fas fa-code-branch"></i> 规则
+                        <i class="fas fa-code-branch"></i> <span data-i18n="config.tab.rules">Rules</span>
                     </button>
                 </nav>
 
                 <div class="tabs-content">
-                    <!-- ROI Tab -->
                     <div class="tab-pane active" id="tab-roi">
-                        <h3>击杀信息流 (Killfeed) 区域</h3>
-                        <p class="desc">请在左侧画布上框选游戏显示击杀信息的区域。</p>
-                        
+                        <h3 data-i18n="config.roiTitle">Killfeed detection region</h3>
+                        <p class="desc" data-i18n="config.roiDesc">Draw the area where killfeed messages appear on the canvas.</p>
                         <div class="form-group">
-                            <label>坐标详情 (归一化 0.0 - 1.0)</label>
+                            <label data-i18n="config.coords">Normalized coordinates (0.0 - 1.0)</label>
                             <div class="coord-inputs">
                                 <div class="field"><span>X</span> <input type="text" id="roi-x" readonly></div>
                                 <div class="field"><span>Y</span> <input type="text" id="roi-y" readonly></div>
@@ -120,139 +117,123 @@
                                 <div class="field"><span>H</span> <input type="text" id="roi-h" readonly></div>
                             </div>
                         </div>
-
                         <div class="alert info">
                             <i class="fas fa-circle-info"></i>
-                            建议稍大于文字实际范围，以覆盖不同长度的击杀信息。
+                            <span data-i18n="config.roiHint">Use a region slightly larger than the visible text to cover different message lengths.</span>
                         </div>
-
                         <div class="roi-zoom-container">
-                            <label>区域预览</label>
+                            <label data-i18n="config.roiPreview">Region preview</label>
                             <canvas id="roi-preview-canvas" width="300" height="100"></canvas>
                         </div>
-                        
                         <button id="save-roi-btn" class="btn success full-width mt-1">
-                            <i class="fas fa-check"></i> 保存区域配置
+                            <i class="fas fa-check"></i> <span data-i18n="config.saveRegion">Save region config</span>
                         </button>
                     </div>
 
-                    <!-- OCR Tab -->
                     <div class="tab-pane" id="tab-ocr">
-                        <h3>OCR 文字匹配</h3>
+                        <h3 data-i18n="config.ocrTitle">OCR keyword matching</h3>
                         <div class="form-group">
                             <label class="toggle">
-                                <span>启用 OCR 验证</span>
+                                <span data-i18n="config.ocrEnabled">Enable OCR validation</span>
                                 <input type="checkbox" id="ocr-enabled" checked>
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="form-group">
-                            <label>关键词 (逗号分隔)</label>
-                            <textarea id="ocr-keywords" placeholder="例如: KILL, ELIMINATED, 击杀了"></textarea>
+                            <label data-i18n="config.ocrKeywords">Keywords (comma separated)</label>
+                            <textarea id="ocr-keywords" data-i18n-placeholder="config.ocrPlaceholder" placeholder="Example: KILL, ELIMINATED, 击杀"></textarea>
                         </div>
                         <div class="form-group">
-                            <label>置信度阈值</label>
+                            <label data-i18n="config.ocrThreshold">Confidence threshold</label>
                             <input type="range" id="ocr-threshold" min="0" max="1" step="0.05" value="0.8">
                             <div class="range-value" id="ocr-threshold-val">0.80</div>
                         </div>
                     </div>
 
-                    <!-- Templates Tab -->
                     <div class="tab-pane" id="tab-templates">
-                        <h3>图标模板匹配</h3>
-                        <p class="desc">针对没有固定文字但有固定图标的游戏（如图标变色）。</p>
+                        <h3 data-i18n="config.templatesTitle">Icon template matching</h3>
+                        <p class="desc" data-i18n="config.templatesDesc">Use this for games that show stable UI icons instead of stable text.</p>
                         <div class="template-list" id="template-list">
-                            <!-- Template items added dynamically -->
-                            <div class="empty-state">尚未创建模板</div>
+                            <div class="empty-state" data-i18n="config.noTemplates">No templates created</div>
                         </div>
                         <button class="btn ghost full-width mt-1" id="add-template-btn">
-                            <i class="fas fa-plus"></i> 捕捉当前 ROI 为模板
+                            <i class="fas fa-plus"></i> <span data-i18n="config.captureTemplate">Capture current ROI as template</span>
                         </button>
                     </div>
 
-                    <!-- Colors Tab -->
                     <div class="tab-pane" id="tab-colors">
-                        <h3>颜色采样检测</h3>
-                        <p class="desc">检测区域内是否出现特定颜色（如血条红色）。</p>
+                        <h3 data-i18n="config.colorsTitle">Color sampling detection</h3>
+                        <p class="desc" data-i18n="config.colorsDesc">Detect specific colors inside the region, such as enemy red or headshot yellow.</p>
                         <div id="color-sampler-list"></div>
                         <button class="btn ghost full-width" id="start-color-sample">
-                            <i class="fas fa-crosshairs"></i> 开启颜色吸管
+                            <i class="fas fa-crosshairs"></i> <span data-i18n="config.startColorSample">Start color picker</span>
                         </button>
                     </div>
 
-                    <!-- Rules Tab -->
                     <div class="tab-pane" id="tab-rules">
-                        <h3>检测规则 (OR-of-AND)</h3>
-                        <p class="desc">配置击杀判定规则。满足任一规则即判定为击杀。</p>
-                        
+                        <h3 data-i18n="config.rulesTitle">Detection rules (OR-of-AND)</h3>
+                        <p class="desc" data-i18n="config.rulesDesc">A kill is detected when any enabled rule matches all of its required signals.</p>
                         <div class="alert info">
                             <i class="fas fa-circle-info"></i>
-                            规则组合逻辑：规则之间为 OR（任一匹配即可），规则内条件为 AND（全部满足）。
+                            <span data-i18n="config.rulesHint">Rules are OR between rows and AND inside one rule.</span>
                         </div>
-
                         <div id="rules-list">
-                            <div class="empty-state">尚未配置规则，将使用默认加权计算</div>
+                            <div class="empty-state" data-i18n="config.noRules">No rules configured; weighted scoring will be used.</div>
                         </div>
-                        
                         <button class="btn ghost full-width mt-1" id="add-rule-btn">
-                            <i class="fas fa-plus"></i> 添加规则
+                            <i class="fas fa-plus"></i> <span data-i18n="config.addRule">Add rule</span>
                         </button>
-                        
                         <button id="save-rules-btn" class="btn success full-width mt-1">
-                            <i class="fas fa-save"></i> 保存规则配置
+                            <i class="fas fa-save"></i> <span data-i18n="config.saveRules">Save rules config</span>
                         </button>
                     </div>
                 </div>
             </aside>
         </main>
 
-        <!-- Bottom Feature: Config Preview Footer -->
         <footer class="config-preview-bar">
             <div class="preview-header">
-                <div class="title"><i class="fas fa-code"></i> YAML 实时预览</div>
+                <div class="title"><i class="fas fa-code"></i> <span data-i18n="config.yamlPreview">Live YAML preview</span></div>
                 <div class="actions">
-                    <button class="icon-btn" id="copy-config" title="复制到剪贴板">
+                    <button class="icon-btn" id="copy-config" data-i18n-title="config.copy" title="Copy to clipboard">
                         <i class="fas fa-copy"></i>
                     </button>
                 </div>
             </div>
             <div class="preview-body">
-                <pre><code id="config-yaml-preview"># 尚未生成配置...</code></pre>
+                <pre><code id="config-yaml-preview" data-i18n="config.noYaml"># No config generated yet...</code></pre>
             </div>
         </footer>
     </div>
 
-    <!-- Modals -->
     <div class="modal" id="add-game-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>新增游戏配置</h2>
+                <h2 data-i18n="config.addGameHeading">Add game config</h2>
                 <button class="close-modal"><i class="fas fa-times"></i></button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label>游戏名称 (英文 ID，如: battlefield_6)</label>
-                    <input type="text" id="new-game-name" placeholder="请输入游戏系统 ID">
+                    <label data-i18n="config.gameIdLabel">Game name (English ID, for example: battlefield_6)</label>
+                    <input type="text" id="new-game-name" data-i18n-placeholder="config.gameIdPlaceholder" placeholder="Enter a game config ID">
                 </div>
-                <p class="desc">系统将基于 `default_game_template.yaml` 初始化该配置。</p>
+                <p class="desc" data-i18n="config.gameCreateDesc">The config will be initialized from `config/default_game_template.yaml`.</p>
             </div>
             <div class="modal-footer">
-                <button class="btn secondary close-modal">取消</button>
-                <button class="btn primary" id="confirm-add-game">创建</button>
+                <button class="btn secondary close-modal" data-i18n="config.cancel">Cancel</button>
+                <button class="btn primary" id="confirm-add-game" data-i18n="config.create">Create</button>
             </div>
         </div>
     </div>
 
-    <!-- Hidden File Input -->
     <input type="file" id="file-input" accept="image/*" style="display: none;">
 
-    <!-- Background Notifications & Loading -->
     <div id="loading-overlay" class="loading-overlay">
         <div class="spinner"></div>
-        <div id="loading-text">正在初始化...</div>
+        <div id="loading-text" data-i18n="config.initializing">Initializing...</div>
     </div>
 
-    <!-- Scripts (Ordered) -->
+    <script src="/static/js/i18n.js"></script>
     <script src="/static/js/tabs.js"></script>
     <script src="/static/js/canvas-state.js"></script>
     <script src="/static/js/tab-roi.js"></script>

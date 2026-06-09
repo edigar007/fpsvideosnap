@@ -19,6 +19,7 @@ class ConfigPreview {
                 this.copyToClipboard();
             });
         }
+        document.addEventListener('languageChanged', () => this.render());
     }
 
     update(config) {
@@ -29,7 +30,8 @@ class ConfigPreview {
     render() {
         // Simple YAML conversion for preview
         // In a real app, we might use a library or get this from the backend
-        let yaml = "# 实时配置预览 (v2.0)\n";
+        const t = window.i18n ? window.i18n.t : (key) => key;
+        let yaml = `${t('config.previewYamlHeader')}\n`;
         
         if (this.currentConfig.game) {
             yaml += `game: ${this.currentConfig.game}\n\n`;
@@ -93,7 +95,8 @@ class ConfigPreview {
             await navigator.clipboard.writeText(text);
             if (this.copyBtn) {
                 const originalText = this.copyBtn.innerHTML;
-                this.copyBtn.innerHTML = '<i class="fas fa-check"></i> 已复制';
+                const t = window.i18n ? window.i18n.t : (key) => key;
+                this.copyBtn.innerHTML = `<i class="fas fa-check"></i> ${t('config.copied')}`;
                 setTimeout(() => {
                     this.copyBtn.innerHTML = originalText;
                 }, 2000);

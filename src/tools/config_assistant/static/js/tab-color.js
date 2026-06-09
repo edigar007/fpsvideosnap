@@ -1,3 +1,5 @@
+const colorTr = (key, params = {}) => window.i18n ? window.i18n.t(key, params) : key;
+
 /**
  * Color Tab Logic
  * Handles color sampling, HSV ranges, and real-time masking preview.
@@ -14,7 +16,7 @@ class ColorTab {
     init() {
         if (this.startBtn) {
             this.startBtn.addEventListener('click', () => {
-                alert('请在蓝框区域内点击要采样的像素点');
+                alert(colorTr('config.colorSampleHint'));
             });
         }
 
@@ -34,6 +36,8 @@ class ColorTab {
         document.addEventListener('ruleChanged', (e) => {
             this.loadRuleColors(e.detail.ruleName);
         });
+
+        document.addEventListener('languageChanged', () => this.refreshList());
     }
 
     setColors(colors) {
@@ -43,10 +47,10 @@ class ColorTab {
 
     async onColorSampled(pos) {
         const game = document.getElementById('game-selector').value;
-        if (!game) return alert('请先选择游戏');
+        if (!game) return alert(colorTr('config.selectGameFirst'));
 
         const imagePath = window.app?.imagePath;
-        if (!imagePath) return alert('请先上传图片');
+        if (!imagePath) return alert(colorTr('config.uploadImageFirst'));
 
         if (!window.canvasState?.canvas) return;
         const canvas = window.canvasState.canvas;
@@ -67,17 +71,17 @@ class ColorTab {
 
             if (!response.ok) {
                 const err = await response.json();
-                return alert('颜色采样失败: ' + (err.error || '未知错误'));
+                return alert(colorTr('config.colorSampleFailed', { error: err.error || colorTr('config.unknownError') }));
             }
 
             const data = await response.json();
-            const name = prompt('请输入颜色名称 (如: kill_red, headshot_yellow):');
+            const name = prompt(colorTr('config.colorNamePrompt'));
             if (!name) return;
 
             await this.addColor(name, data);
         } catch (err) {
             console.error('Color sample error:', err);
-            alert('颜色采样失败');
+            alert(colorTr('config.colorSampleFailed', { error: colorTr('config.unknownError') }));
         }
     }
 
@@ -107,7 +111,7 @@ class ColorTab {
 
             if (!response.ok) {
                 const err = await response.json();
-                return alert('添加颜色失败: ' + (err.error || '未知错误'));
+                return alert(colorTr('config.addColorFailed', { error: err.error || colorTr('config.unknownError') }));
             }
 
             const data = await response.json();
@@ -125,7 +129,7 @@ class ColorTab {
 
         const names = Object.keys(this.colors);
         if (names.length === 0) {
-            this.colorList.innerHTML = '<div class="empty-state">尚未创建颜色采样</div>';
+            this.colorList.innerHTML = `<div class="empty-state">${colorTr('config.noColors')}</div>`;
             return;
         }
 
@@ -139,8 +143,8 @@ class ColorTab {
             header.innerHTML = `
                 <span class="color-name">${name}</span>
                 <div class="color-actions">
-                    <button class="icon-btn preview-btn" title="预览高亮"><i class="fas fa-eye"></i></button>
-                    <button class="icon-btn delete-btn" title="删除"><i class="fas fa-trash"></i></button>
+                    <button class="icon-btn preview-btn" title="${colorTr('config.previewHighlight')}"><i class="fas fa-eye"></i></button>
+                    <button class="icon-btn delete-btn" title="${colorTr('config.delete')}"><i class="fas fa-trash"></i></button>
                 </div>
             `;
 
@@ -150,7 +154,7 @@ class ColorTab {
             const toleranceGroup = document.createElement('div');
             toleranceGroup.className = 'form-group mt-05';
             toleranceGroup.innerHTML = `
-                <label>容差 (Tolerance): <span class="tol-val">${colorData.tolerance || 20}</span></label>
+                <label>${colorTr('config.tolerance')}: <span class="tol-val">${colorData.tolerance || 20}</span></label>
                 <input type="range" class="tolerance-slider" min="5" max="100" value="${colorData.tolerance || 20}">
             `;
 
@@ -207,7 +211,7 @@ class ColorTab {
         const imagePath = window.app?.imagePath;
 
         if (!roi) return;
-        if (!imagePath) return alert('请先上传图片');
+        if (!imagePath) return alert(colorTr('config.uploadImageFirst'));
 
         const color = this.colors[name];
         if (!color) return;
@@ -247,7 +251,7 @@ class ColorTab {
     }
 
     async deleteColor(name) {
-        if (!confirm(`确定要删除颜色 "${name}" 吗？`)) return;
+        if (!confirm(colorTr('config.deleteColorConfirm', { name }))) return;
         const game = document.getElementById('game-selector').value;
 
         const currentRule = window.app?.currentRuleName;
@@ -288,7 +292,7 @@ class ColorTab {
 
         this.setColors(colors);
         if (window.app?.showStatus) {
-            window.app.showStatus(ruleName ? `已加载规则 ${ruleName} 的颜色` : '已加载全局颜色');
+            window.app.showStatus(ruleName ? colorTr('config.ruleLoadedColors', { name: ruleName }) : colorTr('config.globalLoadedColors'));
         }
     }
 

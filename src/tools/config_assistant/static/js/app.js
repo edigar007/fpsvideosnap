@@ -2,6 +2,7 @@
  * Main application coordinator for Config Assistant v2.0
  */
 document.addEventListener('DOMContentLoaded', () => {
+    const tr = (key, params = {}) => window.i18n ? window.i18n.t(key, params) : key;
     // UI Elements
     const gameSelector = document.getElementById('game-selector');
     const addGameBtn = document.getElementById('add-game-btn');
@@ -70,11 +71,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 .join('');
                 
             if (appState.gamesList.length === 0) {
-                gameSelector.innerHTML = '<option value="">请新增游戏...</option>';
+                gameSelector.innerHTML = `<option value="">${tr('config.gameListEmpty')}</option>`;
             }
         } catch (err) {
             console.error('Failed to load games list:', err);
-            showStatus('加载游戏列表失败', 'error');
+            showStatus(tr('config.gameListFailed'), 'error');
         }
     }
 
@@ -84,14 +85,14 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadGameConfig(gameId) {
         if (!gameId) return;
         
-        showLoading(`正在加载 ${gameId} 的配置...`);
+        showLoading(tr('config.loadingConfig', { game: gameId }));
         try {
             const response = await fetch(`/api/config/${gameId}`);
             const config = await response.json();
             
             appState.currentGame = gameId;
             appState.config = config;
-            resetTestResult('上传图片后点击测试配置');
+            resetTestResult(tr('config.testSummaryIdle'));
             
             // Sync with other modules
             if (window.configPreview) {
@@ -123,10 +124,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.rulesTab.setRules(config.detection.rules);
             }
             
-            showStatus(`${gameId} 配置已加载`, 'success');
+            showStatus(tr('config.configLoaded', { game: gameId }), 'success');
         } catch (err) {
             console.error('Failed to load config:', err);
-            showStatus('加载配置失败', 'error');
+            showStatus(tr('config.configLoadFailed'), 'error');
         } finally {
             hideLoading();
         }
@@ -145,7 +146,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         confirmAddGameBtn.addEventListener('click', async () => {
             const name = newGameNameInput.value.trim();
-            if (!name) return alert('请输入游戏名称');
+            if (!name) return alert(tr('config.enterGameName'));
             
             try {
                 const response = await fetch('/api/game/create', {
@@ -162,11 +163,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     newGameNameInput.value = '';  // 清空输入框
                 } else {
                     const errorData = await response.json();
-                    alert(`创建失败: ${errorData.error || '未知错误'}`);
+                    alert(tr('config.createFailed', { error: errorData.error || tr('config.unknownError') }));
                 }
             } catch (err) {
                 console.error(err);
-                alert('网络错误');
+                alert(tr('config.networkError'));
             }
         });
 
@@ -272,10 +273,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function handleFile(file) {
         if (!file.type.startsWith('image/')) {
-            return showStatus('请上传图片文件', 'error');
+            return showStatus(tr('config.imageFilesOnly'), 'error');
         }
 
-        showLoading('正在上传图片...');
+        showLoading(tr('config.uploadingImage'));
         
         try {
             const formData = new FormData();
@@ -291,7 +292,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Store absolute path for backend tools (OCR, Template)
             appState.currentImagePath = data.path;
-            resetTestResult('图片已加载，点击测试配置');
+            resetTestResult(tr('config.imageLoadedTest'));
             
             // Preview locally
             const reader = new FileReader();
@@ -307,10 +308,10 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             reader.readAsDataURL(file);
             
-            showStatus('图片加载成功', 'success');
+            showStatus(tr('config.imageLoaded'), 'success');
         } catch (err) {
             console.error('Upload failed:', err);
-            showStatus('图片上传失败', 'error');
+            showStatus(tr('config.imageUploadFailed'), 'error');
         } finally {
             hideLoading();
         }
@@ -328,33 +329,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (appState.currentRuleName) {
                     updateRuleIndicator();
                 } else {
-                    statusMessage.textContent = '准备就绪';
+                    statusMessage.textContent = tr('config.readyText');
                     statusMessage.className = 'status-badge';
                 }
             }
         }, 3000);
     }
 
-    function resetTestResult(summary = '上传图片后点击测试配置') {
+    function resetTestResult(summary = tr('config.testSummaryIdle')) {
         if (!testPanel) return;
         testPanel.className = 'config-test-panel idle';
-        testResultBadge.textContent = '待测试';
+        testResultBadge.textContent = tr('config.testBadgeIdle');
         testResultSummary.textContent = summary;
         testResultDetails.innerHTML = '';
     }
 
     async function testCurrentConfig() {
         if (!appState.currentGame) {
-            showStatus('请先选择游戏', 'error');
+            showStatus(tr('config.selectGameFirst'), 'error');
             return;
         }
         if (!appState.currentImagePath) {
-            showStatus('请先上传图片', 'error');
-            resetTestResult('请先上传要测试的图片');
+            showStatus(tr('config.uploadImageFirst'), 'error');
+            resetTestResult(tr('config.uploadImageFirst'));
             return;
         }
 
-        showLoading('正在测试当前配置...');
+        showLoading(tr('config.testRunningSummary'));
         setTestRunning();
 
         try {
@@ -366,15 +367,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const data = await response.json();
             if (!response.ok) {
-                throw new Error(data.error || '测试失败');
+                throw new Error(data.error || tr('config.testFailure'));
             }
 
             renderTestResult(data);
-            showStatus(data.is_kill ? '测试成功：配置命中' : '测试失败：未命中', data.is_kill ? 'success' : 'error');
+            showStatus(data.is_kill ? tr('config.testStatusSuccess') : tr('config.testStatusFailure'), data.is_kill ? 'success' : 'error');
         } catch (err) {
             console.error('Config test failed:', err);
-            renderTestError(err.message || '测试失败');
-            showStatus('配置测试失败', 'error');
+            renderTestError(err.message || tr('config.testFailure'));
+            showStatus(tr('config.testConfigFailed'), 'error');
         } finally {
             hideLoading();
         }
@@ -383,15 +384,15 @@ document.addEventListener('DOMContentLoaded', () => {
     function setTestRunning() {
         if (!testPanel) return;
         testPanel.className = 'config-test-panel running';
-        testResultBadge.textContent = '测试中';
-        testResultSummary.textContent = '正在按当前配置检测图片...';
+        testResultBadge.textContent = tr('config.testRunning');
+        testResultSummary.textContent = tr('config.testRunningSummary');
         testResultDetails.innerHTML = '';
     }
 
     function renderTestError(message) {
         if (!testPanel) return;
         testPanel.className = 'config-test-panel failure';
-        testResultBadge.textContent = '失败';
+        testResultBadge.textContent = tr('config.testFailure');
         testResultSummary.textContent = message;
         testResultDetails.innerHTML = '';
     }
@@ -401,10 +402,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const passed = Boolean(data.is_kill);
         testPanel.className = `config-test-panel ${passed ? 'success' : 'failure'}`;
-        testResultBadge.textContent = passed ? '成功' : '失败';
+        testResultBadge.textContent = passed ? tr('config.testSuccess') : tr('config.testFailure');
         testResultSummary.textContent = passed
-            ? `检测命中，置信度 ${formatPct(data.confidence)}`
-            : `未达到命中条件，置信度 ${formatPct(data.confidence)}`;
+            ? tr('config.testHitSummary', { confidence: formatPct(data.confidence) })
+            : tr('config.testMissSummary', { confidence: formatPct(data.confidence) });
 
         const details = data.details || {};
         const signals = data.signals || {};
@@ -413,12 +414,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const warnings = data.warnings || [];
 
         const rows = [
-            ['模式', data.mode === 'rules' ? '规则判定' : '加权判定'],
-            ['预筛选', data.prefilter_passed ? '通过' : '未通过'],
-            ['颜色', `${booleans.color ? '命中' : '未命中'} (${formatPct(details.color?.max_match_percent || 0)} 像素)`],
-            ['模板', `${booleans.template ? '命中' : '未命中'} (${formatPct(signals.template || 0)})`],
-            ['OCR', formatOcrResult(details.ocr, booleans.ocr)],
-            ['YOLO', details.yolo?.available ? formatPct(signals.yolo || 0) : '未在助手测试中运行']
+            [tr('config.testMode'), data.mode === 'rules' ? tr('config.rulesMode') : tr('config.weightedMode')],
+            [tr('config.testPrefilter'), data.prefilter_passed ? tr('config.passed') : tr('config.failed')],
+            [tr('config.testColor'), `${booleans.color ? tr('config.hit') : tr('config.miss')} (${formatPct(details.color?.max_match_percent || 0)} px)`],
+            [tr('config.testTemplate'), `${booleans.template ? tr('config.hit') : tr('config.miss')} (${formatPct(signals.template || 0)})`],
+            [tr('config.testOcr'), formatOcrResult(details.ocr, booleans.ocr)],
+            [tr('config.testYolo'), details.yolo?.available ? formatPct(signals.yolo || 0) : tr('config.notRunInAssistant')]
         ];
 
         let html = `
@@ -434,12 +435,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (rules.length > 0) {
             html += `
-                <div class="test-section-title">规则结果</div>
+                <div class="test-section-title">${escapeHtml(tr('config.ruleResults'))}</div>
                 <div class="test-rule-list">
                     ${rules.map(rule => `
                         <div class="test-rule-item ${rule.matched ? 'matched' : 'missed'}">
                             <span>${escapeHtml(rule.name)}</span>
-                            <strong>${rule.matched ? '命中' : `缺少: ${escapeHtml((rule.missing || []).join(', ') || '条件')}`}</strong>
+                            <strong>${rule.matched ? tr('config.hit') : escapeHtml(tr('config.missing', { items: (rule.missing || []).join(', ') || tr('config.conditions') }))}</strong>
                         </div>
                     `).join('')}
                 </div>
@@ -458,13 +459,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function formatOcrResult(ocr, matched) {
-        if (!ocr?.enabled) return '未启用';
-        if (!ocr.available) return '不可用';
+        if (!ocr?.enabled) return tr('config.disabled');
+        if (!ocr.available) return tr('config.unavailable');
         if (matched) {
-            const text = ocr.match?.text || ocr.match?.matched_keyword || '关键词';
-            return `命中 ${text}`;
+            const text = ocr.match?.text || ocr.match?.matched_keyword || 'keyword';
+            return `${tr('config.hit')} ${text}`;
         }
-        return `未命中 (${ocr.detections?.length || 0} 条文字)`;
+        return `${tr('config.miss')} (${ocr.detections?.length || 0})`;
     }
 
     function formatPct(value) {
@@ -500,11 +501,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const ruleIndicator = document.getElementById('current-rule-indicator');
         if (ruleIndicator) {
             if (appState.currentRuleName) {
-                ruleIndicator.textContent = `当前编辑: ${appState.currentRuleName}`;
+                ruleIndicator.textContent = `${tr('config.currentEditing')}: ${appState.currentRuleName}`;
                 ruleIndicator.classList.add('rule-mode');
                 ruleIndicator.style.display = 'inline-block';
             } else {
-                ruleIndicator.textContent = '编辑全局配置';
+                ruleIndicator.textContent = tr('config.globalConfig');
                 ruleIndicator.classList.remove('rule-mode');
                 ruleIndicator.style.display = 'none'; // Hide when global to avoid clutter? Or show "Global"? 
                 // Requirement says: "编辑全局" button to deselect.
@@ -527,7 +528,7 @@ document.addEventListener('DOMContentLoaded', () => {
         setCurrentRule
     };
 
-    function showLoading(text = '正在处理...') {
+    function showLoading(text = tr('config.processing')) {
         document.getElementById('loading-text').textContent = text;
         loadingOverlay.style.display = 'flex';
     }

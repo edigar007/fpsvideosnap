@@ -1,3 +1,5 @@
+const ocrTr = (key, params = {}) => window.i18n ? window.i18n.t(key, params) : key;
+
 /**
  * OCR Tab Logic
  * Handles real-time OCR execution, keyword management, and testing.
@@ -41,6 +43,7 @@ class OCRTab {
         });
 
         this.setupUI();
+        document.addEventListener('languageChanged', () => this.refreshLabels());
     }
 
     setupUI() {
@@ -53,34 +56,40 @@ class OCRTab {
         
         this.testMatchBtn = document.createElement('button');
         this.testMatchBtn.className = 'btn ghost full-width';
-        this.testMatchBtn.innerHTML = '<i class="fas fa-vial"></i> 测试关键词匹配';
+        this.testMatchBtn.innerHTML = `<i class="fas fa-vial"></i> ${ocrTr('config.addKeywordTest')}`;
         this.testMatchBtn.onclick = () => this.testMatching();
         actionsDiv.appendChild(this.testMatchBtn);
 
         tabPane.appendChild(actionsDiv);
 
         // Results Section
-        const resultsTitle = document.createElement('h4');
-        resultsTitle.textContent = '检测结果 (点击添加为关键词)';
-        resultsTitle.className = 'mt-1';
-        tabPane.appendChild(resultsTitle);
+        this.resultsTitle = document.createElement('h4');
+        this.resultsTitle.textContent = ocrTr('config.ocrResultsTitle');
+        this.resultsTitle.className = 'mt-1';
+        tabPane.appendChild(this.resultsTitle);
 
         this.resultsList = document.createElement('div');
         this.resultsList.className = 'ocr-results-list';
-        this.resultsList.innerHTML = '<div class="empty-state">切换到此 Tab 时将自动开始 OCR</div>';
+        this.resultsList.innerHTML = `<div class="empty-state">${ocrTr('config.ocrResultsEmpty')}</div>`;
         tabPane.appendChild(this.resultsList);
 
         // Save Button
         this.saveBtn = document.createElement('button');
         this.saveBtn.className = 'btn success full-width mt-1';
-        this.saveBtn.innerHTML = '<i class="fas fa-save"></i> 保存 OCR 配置';
+        this.saveBtn.innerHTML = `<i class="fas fa-save"></i> ${ocrTr('config.saveOcr')}`;
         this.saveBtn.onclick = () => this.saveOCR();
         tabPane.appendChild(this.saveBtn);
     }
 
+    refreshLabels() {
+        if (this.testMatchBtn) this.testMatchBtn.innerHTML = `<i class="fas fa-vial"></i> ${ocrTr('config.addKeywordTest')}`;
+        if (this.resultsTitle) this.resultsTitle.textContent = ocrTr('config.ocrResultsTitle');
+        if (this.saveBtn) this.saveBtn.innerHTML = `<i class="fas fa-save"></i> ${ocrTr('config.saveOcr')}`;
+    }
+
     async onTabActive() {
         if (!window.canvasState || !window.canvasState.roi) {
-            this.resultsList.innerHTML = '<div class="alert warning">请先在 ROI Tab 选择检测区域</div>';
+            this.resultsList.innerHTML = `<div class="alert warning">${ocrTr('config.selectRoiFirst')}</div>`;
             return;
         }
 
@@ -89,13 +98,13 @@ class OCRTab {
     }
 
     async runOCR() {
-        this.resultsList.innerHTML = '<div class="loading-inline"><i class="fas fa-spinner fa-spin"></i> 正在运行 OCR...</div>';
+        this.resultsList.innerHTML = `<div class="loading-inline"><i class="fas fa-spinner fa-spin"></i> ${ocrTr('config.runningOcr')}</div>`;
         
         const roi = window.canvasState.roi;
         const imagePath = window.app?.imagePath;
         
         if (!imagePath) {
-            this.resultsList.innerHTML = '<div class="alert warning">请先上传图片</div>';
+            this.resultsList.innerHTML = `<div class="alert warning">${ocrTr('config.uploadImageFirst')}</div>`;
             return;
         }
 
@@ -114,21 +123,21 @@ class OCRTab {
                 this.ocrResults = data.results || [];
                 this.renderResults();
                 if (this.ocrResults.length === 0) {
-                    this.resultsList.innerHTML = '<div class="alert info">OCR 未识别到文字，请确保图片清晰且 ROI 区域包含文字</div>';
+                    this.resultsList.innerHTML = `<div class="alert info">${ocrTr('config.noOcrText')}</div>`;
                 }
             } else {
                 const errorData = await response.json();
-                this.resultsList.innerHTML = `<div class="alert error">OCR 识别失败: ${errorData.error || '未知错误'}</div>`;
+                this.resultsList.innerHTML = `<div class="alert error">${ocrTr('config.ocrFailed', { error: errorData.error || ocrTr('config.unknownError') })}</div>`;
             }
         } catch (err) {
             console.error('OCR Error:', err);
-            this.resultsList.innerHTML = '<div class="alert error">无法连接到 OCR 服务</div>';
+            this.resultsList.innerHTML = `<div class="alert error">${ocrTr('config.ocrDisconnected')}</div>`;
         }
     }
 
     renderResults() {
         if (this.ocrResults.length === 0) {
-            this.resultsList.innerHTML = '<div class="empty-state">未检测到文字</div>';
+            this.resultsList.innerHTML = `<div class="empty-state">${ocrTr('config.noTextDetected')}</div>`;
             return;
         }
 
@@ -136,7 +145,7 @@ class OCRTab {
         this.ocrResults.forEach(res => {
             const item = document.createElement('div');
             item.className = 'ocr-result-item';
-            item.title = '点击添加到关键词';
+            item.title = ocrTr('config.clickToAddKeyword');
             item.innerHTML = `
                 <span class="text">${res.text}</span>
                 <span class="conf">${(res.confidence * 100).toFixed(0)}%</span>
@@ -153,7 +162,7 @@ class OCRTab {
         if (!current.includes(cleanText)) {
             current.push(cleanText);
             this.keywordsArea.value = current.join(', ');
-            if (window.app && window.app.showStatus) window.app.showStatus(`已添加关键词: ${cleanText}`);
+            if (window.app && window.app.showStatus) window.app.showStatus(ocrTr('config.keywordAdded', { text: cleanText }));
         }
     }
 
@@ -161,7 +170,7 @@ class OCRTab {
         const keywords = this.keywordsArea.value.split(',').map(s => s.trim().toLowerCase()).filter(s => s);
         const threshold = parseFloat(this.thresholdInput.value);
 
-        if (keywords.length === 0) return alert('请先设置关键词');
+        if (keywords.length === 0) return alert(ocrTr('config.keywordsRequired'));
 
         const matches = this.ocrResults.filter(res => {
             if (res.confidence < threshold) return false;
@@ -175,16 +184,16 @@ class OCRTab {
             window.canvasState.render();
             
             if (matches.length > 0) {
-                alert(`成功匹配 ${matches.length} 处文字`);
+                alert(ocrTr('config.matchSuccess', { count: matches.length }));
             } else {
-                alert('未发现匹配的关键词');
+                alert(ocrTr('config.noKeywordMatch'));
             }
         }
     }
 
     async saveOCR() {
         const game = document.getElementById('game-selector').value;
-        if (!game) return alert('请选择游戏');
+        if (!game) return alert(ocrTr('config.selectGameFirst'));
 
         const config = {
             enabled: this.enabledCheck.checked,
@@ -207,9 +216,9 @@ class OCRTab {
             if (response.ok) {
                 const data = await response.json();
                 if (window.app && window.app.showStatus) {
-                    window.app.showStatus('OCR 配置已保存', 'success');
+                    window.app.showStatus(ocrTr('config.ocrSaved'), 'success');
                 } else {
-                    alert('OCR 配置已保存');
+                    alert(ocrTr('config.ocrSaved'));
                 }
                 if (window.configPreview && data.config) {
                     window.configPreview.update(data.config);
@@ -221,11 +230,11 @@ class OCRTab {
                     }
                 }
             } else {
-                alert('保存失败');
+                alert(ocrTr('config.saveFailed', { error: ocrTr('config.unknownError') }));
             }
         } catch (err) {
             console.error('Save OCR Error:', err);
-            alert('网络错误');
+            alert(ocrTr('config.networkError'));
         }
     }
 
@@ -265,7 +274,7 @@ class OCRTab {
         
         this.setConfig(ocr);
         if (window.app?.showStatus) {
-            window.app.showStatus(ruleName ? `已加载规则 ${ruleName} 的 OCR` : '已加载全局 OCR');
+            window.app.showStatus(ruleName ? ocrTr('config.ruleLoadedOcr', { name: ruleName }) : ocrTr('config.globalLoadedOcr'));
         }
     }
 }

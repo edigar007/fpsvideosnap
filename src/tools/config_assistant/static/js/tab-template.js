@@ -1,3 +1,5 @@
+const templateTr = (key, params = {}) => window.i18n ? window.i18n.t(key, params) : key;
+
 /**
  * Template Tab Logic
  * Handles capturing, listing, and managing icon templates.
@@ -29,6 +31,8 @@ class TemplateTab {
         document.addEventListener('ruleChanged', (e) => {
             this.loadRuleTemplates(e.detail.ruleName);
         });
+
+        document.addEventListener('languageChanged', () => this.refreshList());
     }
 
     setTemplates(templates) {
@@ -39,7 +43,7 @@ class TemplateTab {
     onSubRoiSelected(subRoi) {
         if (!subRoi) return;
         
-        const name = prompt('请输入模板名称 (如: kill_icon, headshot):');
+        const name = prompt(templateTr('config.templateNamePrompt'));
         if (!name) {
             window.canvasState.subRoi = null;
             window.canvasState.render();
@@ -51,14 +55,14 @@ class TemplateTab {
 
     async addTemplate(name, subRoi) {
         const game = document.getElementById('game-selector').value;
-        if (!game) return alert('请先选择游戏');
+        if (!game) return alert(templateTr('config.selectGameFirst'));
         
         const imagePath = window.app?.imagePath;
-        if (!imagePath) return alert('请先上传图片');
+        if (!imagePath) return alert(templateTr('config.uploadImageFirst'));
         
         // Convert subRoi (relative to ROI) to absolute (relative to image)
         const roi = window.canvasState.roi;
-        if (!roi) return alert('请先设置主 ROI');
+        if (!roi) return alert(templateTr('config.mainRoiFirst'));
         
         const [rx, ry, rw, rh] = roi;
         const [sx, sy, sw, sh] = subRoi;
@@ -85,7 +89,7 @@ class TemplateTab {
             
             if (!cropResponse.ok) {
                 const cropErr = await cropResponse.json();
-                return alert('裁剪模板失败: ' + (cropErr.error || '未知错误'));
+                return alert(templateTr('config.cropTemplateFailed', { error: cropErr.error || templateTr('config.unknownError') }));
             }
             
             const cropData = await cropResponse.json();
@@ -126,7 +130,7 @@ class TemplateTab {
                 window.canvasState.render();
             } else {
                 const err = await response.json();
-                alert('添加模板失败: ' + (err.error || '未知错误'));
+                alert(templateTr('config.addTemplateFailed', { error: err.error || templateTr('config.unknownError') }));
             }
         } catch (err) {
             console.error('Add template error:', err);
@@ -135,9 +139,9 @@ class TemplateTab {
 
     async captureTemplate() {
         if (!window.canvasState || !window.canvasState.roi) {
-            return alert('请先在 ROI Tab 框选主检测区域');
+            return alert(templateTr('config.mainRoiFirst'));
         }
-        alert('请在蓝框区域内拖拽鼠标来框选特定图标模板');
+        alert(templateTr('config.dragInsideRoi'));
     }
 
     refreshList() {
@@ -146,7 +150,7 @@ class TemplateTab {
 
         const names = Object.keys(this.templates);
         if (names.length === 0) {
-            this.templateList.innerHTML = '<div class="empty-state">尚未创建模板</div>';
+            this.templateList.innerHTML = `<div class="empty-state">${templateTr('config.noTemplates')}</div>`;
             return;
         }
 
@@ -166,7 +170,7 @@ class TemplateTab {
             info.className = 'template-info';
             const roiText = temp.roi && Array.isArray(temp.roi) 
                 ? `ROI: [${temp.roi.map(v => v.toFixed(2)).join(', ')}]`
-                : 'ROI: 未设置';
+                : templateTr('config.templateRoiUnset');
             info.innerHTML = `
                 <div class="template-name">${name}</div>
                 <div class="template-meta">${roiText}</div>
@@ -181,7 +185,7 @@ class TemplateTab {
             thresholdInput.max = 1;
             thresholdInput.step = 0.05;
             thresholdInput.value = temp.threshold || 0.8;
-            thresholdInput.title = '匹配阈值';
+            thresholdInput.title = templateTr('config.matchThreshold');
             thresholdInput.onchange = (e) => this.updateThreshold(name, parseFloat(e.target.value));
 
             const delBtn = document.createElement('button');
@@ -228,7 +232,7 @@ class TemplateTab {
     }
 
     async deleteTemplate(name) {
-        if (!confirm(`确定要删除模板 "${name}" 吗？`)) return;
+        if (!confirm(templateTr('config.deleteTemplateConfirm', { name }))) return;
 
         const game = document.getElementById('game-selector').value;
         
@@ -284,7 +288,7 @@ class TemplateTab {
         
         this.setTemplates(templates);
         if (window.app?.showStatus) {
-            window.app.showStatus(ruleName ? `已加载规则 ${ruleName} 的模板` : '已加载全局模板');
+            window.app.showStatus(ruleName ? templateTr('config.ruleLoadedTemplates', { name: ruleName }) : templateTr('config.globalLoadedTemplates'));
         }
     }
 }
