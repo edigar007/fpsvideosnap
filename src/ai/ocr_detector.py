@@ -10,52 +10,11 @@ from typing import List, Dict, Optional
 
 from src.utils.temp_manager import temp_manager
 from src.ai.paddleocr_subprocess import PaddleOCRSubprocess
+from src.utils.cuda_dll import setup_cuda_dll_directories
 
 # Windows GPU 支持：必须在导入 PaddleOCR 之前设置 CUDA DLL 路径
-if sys.platform == 'win32':
-    try:
-        import site
-        # 获取 site-packages 路径
-        site_packages_list = site.getsitepackages()
-        site_packages = None
-        for sp in site_packages_list:
-            if os.path.exists(os.path.join(sp, 'nvidia')):
-                site_packages = sp
-                break
-        
-        if site_packages:
-            nvidia_dirs = [
-                'nvidia\\cudnn\\bin',
-                'nvidia\\cublas\\bin', 
-                'nvidia\\cuda_runtime\\bin',
-                'nvidia\\cufft\\bin',
-                'nvidia\\curand\\bin',
-                'nvidia\\cusolver\\bin',
-                'nvidia\\cusparse\\bin',
-                'nvidia\\nvjitlink\\bin',
-            ]
-            
-            # 使用 PATH 方法（最兼容）
-            added_paths = []
-            current_path = os.environ.get('PATH', '')
-            for nvidia_dir in nvidia_dirs:
-                nvidia_path = os.path.join(site_packages, nvidia_dir)
-                if os.path.exists(nvidia_path) and nvidia_path not in current_path:
-                    # Python 3.8+ 推荐：显式加入 DLL 搜索目录
-                    if hasattr(os, 'add_dll_directory'):
-                        try:
-                            os.add_dll_directory(nvidia_path)
-                        except OSError as exc:
-                            print(f"[GPU] Warning: Failed to add DLL directory {nvidia_path}: {exc}")
-
-                    os.environ['PATH'] = nvidia_path + os.pathsep + current_path
-                    current_path = os.environ['PATH']
-                    added_paths.append(nvidia_path)
-            
-            if added_paths:
-                print(f"[GPU] Added {len(added_paths)} CUDA DLL paths to PATH")
-    except Exception as e:
-        print(f"[GPU] Warning: Failed to add CUDA paths: {e}")
+if sys.platform == "win32":
+    setup_cuda_dll_directories()
 
 try:
     from rapidfuzz import fuzz

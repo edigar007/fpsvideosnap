@@ -1,6 +1,23 @@
 import os
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
+
+
+def format_duration(seconds: Any) -> str:
+    """
+    Format a duration in seconds as HH:MM:SS.
+    Returns '00:00:00' for missing or unparseable input.
+    """
+    try:
+        total = int(float(seconds))
+    except (TypeError, ValueError):
+        return "00:00:00"
+    if total < 0:
+        total = 0
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
 
 class ReportGenerator:
     """
@@ -48,15 +65,16 @@ class ReportGenerator:
                         logs: List[str]) -> str:
         
         # Header
+        stats = self._resolve_video_stats(video_info)
         lines = [
             "# FPS Video Snap Processing Report",
             f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "",
             "## 1. Video Statistics",
-            f"- **Source File**: {video_info.get('video_path', 'Unknown')}",
-            f"- **Resolution**: {video_info.get('width', 0)}x{video_info.get('height', 0)}",
-            f"- **FPS**: {video_info.get('fps', 0)}",
-            f"- **Duration**: {video_info.get('duration_str', '00:00:00')}",
+            f"- **Source File**: {stats['video_path']}",
+            f"- **Resolution**: {stats['width']}x{stats['height']}",
+            f"- **FPS**: {stats['fps']}",
+            f"- **Duration**: {stats['duration_str']}",
             "",
             "## 2. Detection Summary",
             f"- **Total Kills Detected**: {total_kills}",
@@ -113,6 +131,52 @@ class ReportGenerator:
             lines.append("```")
             
         return "\n".join(lines)
+
+    @staticmethod
+    def _parse_resolution(resolution: Any) -> Tuple[Any, Any]:
+        """
+        Parse a 'WxH' resolution string into (width, height).
+        Returns (None, None) when the string is missing or unparseable.
+        """
+        if not resolution:
+            return None, None
+        try:
+            w_str, h_str = str(resolution).split("x", 1)
+            return int(w_str), int(h_str)
+        except (TypeError, ValueError):
+            return None, None
+
+    def _resolve_video_stats(self, video_info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Resolve video statistics from either key scheme.
+
+        Supports the new keys ({video_path, width, height, fps, duration_str})
+        as well as the legacy pipeline keys ({path, duration, resolution, fps}).
+        Never raises on missing or malformed values.
+        """
+        video_path = video_info.get("video_path") or video_info.get("path", "Unknown")
+
+        width = video_info.get("width")
+        height = video_info.get("height")
+        if not width or not height:
+            parsed_w, parsed_h = self._parse_resolution(video_info.get("resolution"))
+            width = width or parsed_w
+            height = height or parsed_h
+
+        fps = video_info.get("fps", 0)
+
+        duration_str = video_info.get("duration_str")
+        if not duration_str:
+            duration = video_info.get("duration")
+            duration_str = format_duration(duration) if duration is not None else "00:00:00"
+
+        return {
+            "video_path": video_path,
+            "width": width if width else 0,
+            "height": height if height else 0,
+            "fps": fps,
+            "duration_str": duration_str,
+        }
 
     def _format_ms(self, ms: float) -> str:
         seconds = int((ms / 1000) % 60)

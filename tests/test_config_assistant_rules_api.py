@@ -146,6 +146,17 @@ def test_put_rules_validation_missing_enabled(client, game_with_config):
     assert "enabled is required" in data["error"]
 
 
+def test_put_rules_validation_enabled_must_be_real_bool(client, game_with_config):
+    """The rules API keeps requiring real booleans even though the typed view is string-aware."""
+    rules = [{"name": "str_false", "enabled": "false", "require": ["yolo"]}]
+
+    rv = client.put(f"/api/config/{game_with_config}/rules", json={"rules": rules})
+
+    assert rv.status_code == 400
+    data = rv.get_json()
+    assert "enabled must be a boolean" in data["error"]
+
+
 def test_put_rules_validation_missing_require(client, game_with_config):
     rules = [{"name": "test", "enabled": True}]
 

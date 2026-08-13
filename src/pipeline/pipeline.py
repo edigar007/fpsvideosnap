@@ -17,7 +17,7 @@ from src.ai.kill_detector import KillDetector
 from src.clip.clip_extractor import ClipExtractor
 from src.video.video_joiner import VideoJoiner
 from src.audio.audio_mixer import AudioMixer
-from src.report.report_generator import ReportGenerator
+from src.report.report_generator import ReportGenerator, format_duration
 from src.history.history_manager import HistoryManager
 from src.pipeline.checkpoint import CheckpointData, CheckpointStore
 from src.pipeline.context import PipelineContext
@@ -300,6 +300,12 @@ class Pipeline:
             "duration": self.video_info.duration,
             "resolution": f"{self.video_info.width}x{self.video_info.height}",
             "fps": self.video_info.fps,
+            # New keys consumed by ReportGenerator; old keys kept for
+            # backward compatibility (e.g. src/pipeline/runner.py run_front_plan).
+            "video_path": context.video_path,
+            "width": self.video_info.width,
+            "height": self.video_info.height,
+            "duration_str": format_duration(self.video_info.duration),
         }
         self._update_stage("metadata", StageStatus.SUCCESS)
 

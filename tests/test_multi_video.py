@@ -1,3 +1,5 @@
+import os
+
 from src.pipeline.multi_video import merge_clips_to_highlight
 
 
@@ -107,6 +109,107 @@ def test_merge_cancel_after_join_skips_audio_mix(tmp_path):
     assert Joiner.calls == 1
     assert Mixer.calls == 0
     assert ReportGenerator.calls == 0
+
+
+def test_merge_cancel_after_join_removes_intermediate(tmp_path, monkeypatch):
+    """Regression: cancelling after join must not leave merged_no_audio on disk
+    when keep_intermediates is False."""
+    _reset_fakes()
+    cancel_event = CancelEvent()
+    Joiner.cancel_event = cancel_event
+    original_join = Joiner.join_clips
+
+    def fake_join(self, clip_paths, output_path):
+        with open(output_path, "w") as f:
+            f.write("partial")
+        return original_join(self, clip_paths, output_path)  # sets cancel_event
+
+    monkeypatch.setattr(Joiner, "join_clips", fake_join)
+
+    result = merge_clips_to_highlight(
+        _config(tmp_path),
+        ["video1.mp4"],
+        _clips(),
+        video_joiner_cls=Joiner,
+        audio_mixer_cls=Mixer,
+        report_generator_cls=ReportGenerator,
+        cancel_event=cancel_event,
+    )
+
+    assert result["cancelled"] is True
+    assert result["stage"] == "merge_audio"
+    leftovers = [p for p in os.listdir(str(tmp_path)) if p.startswith("combined_temp_")]
+    assert leftovers == []
+
+
+def test_merge_cancel_after_audio_removes_intermediate(tmp_path, monkeypatch):
+    """Regression: cancelling after audio mix must not leave merged_no_audio on disk
+    when keep_intermediates is False."""
+    _reset_fakes()
+    cancel_event = CancelEvent()
+    Mixer.cancel_event = cancel_event
+    original_join = Joiner.join_clips
+    original_mix = Mixer.mix_audio
+
+    def fake_join(self, clip_paths, output_path):
+        with open(output_path, "w") as f:
+            f.write("joined")
+        return original_join(self, clip_paths, output_path)
+
+    def fake_mix(self, input_path, output_path):
+        with open(output_path, "w") as f:
+            f.write("mixed")
+        return original_mix(self, input_path, output_path)  # sets cancel_event
+
+    monkeypatch.setattr(Joiner, "join_clips", fake_join)
+    monkeypatch.setattr(Mixer, "mix_audio", fake_mix)
+
+    result = merge_clips_to_highlight(
+        _config(tmp_path),
+        ["video1.mp4"],
+        _clips(),
+        video_joiner_cls=Joiner,
+        audio_mixer_cls=Mixer,
+        report_generator_cls=ReportGenerator,
+        cancel_event=cancel_event,
+    )
+
+    assert result["cancelled"] is True
+    assert result["stage"] == "merge_report"
+    leftovers = [p for p in os.listdir(str(tmp_path)) if p.startswith("combined_temp_")]
+    assert leftovers == []
+
+
+def test_merge_cancel_after_join_keeps_intermediate_when_debug(tmp_path, monkeypatch):
+    """Cancelling after join must keep merged_no_audio when keep_intermediates is enabled."""
+    _reset_fakes()
+    cancel_event = CancelEvent()
+    Joiner.cancel_event = cancel_event
+    config = _config(tmp_path)
+    config["global"]["debug"] = True
+    original_join = Joiner.join_clips
+
+    def fake_join(self, clip_paths, output_path):
+        with open(output_path, "w") as f:
+            f.write("partial")
+        return original_join(self, clip_paths, output_path)
+
+    monkeypatch.setattr(Joiner, "join_clips", fake_join)
+
+    result = merge_clips_to_highlight(
+        config,
+        ["video1.mp4"],
+        _clips(),
+        video_joiner_cls=Joiner,
+        audio_mixer_cls=Mixer,
+        report_generator_cls=ReportGenerator,
+        cancel_event=cancel_event,
+    )
+
+    assert result["cancelled"] is True
+    assert result["stage"] == "merge_audio"
+    leftovers = [p for p in os.listdir(str(tmp_path)) if p.startswith("combined_temp_")]
+    assert len(leftovers) == 1
 
 
 def test_merge_cancel_after_audio_skips_report(tmp_path):

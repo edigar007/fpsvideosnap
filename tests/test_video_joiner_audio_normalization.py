@@ -80,6 +80,34 @@ def test_video_joiner_audio_probe_distinguishes_missing_audio(mock_run):
     assert mock_run.call_args.args[0][0] == "custom_ffprobe"
 
 
+@patch("src.video.video_joiner.VideoInfo")
+@patch("subprocess.run")
+def test_video_joiner_probes_each_clip_once_during_join(mock_run, mock_info):
+    """join_clips must not ffprobe the same clip twice (audio check + normalize)."""
+    config = {
+        "global": {"temp_dir": "temp"},
+        "video": {
+            "ffmpeg_path": "ffmpeg",
+            "ffprobe_path": "ffprobe",
+            "hwaccel": None,
+            "join_fix": {"pre_normalize_clips": False},
+        },
+        "highlights": {"transition_type": "none"},
+    }
+    joiner = VideoJoiner(config)
+    mock_info.return_value.duration = 5.0
+    mock_run.return_value = MagicMock(stdout='{"streams": []}')
+
+    # No audio on either clip -> the join flow checks audio presence and then
+    # normalizes each clip, which used to probe every clip twice.
+    success = joiner.join_clips(["clip1.mp4", "clip2.mp4"], "out.mp4")
+
+    assert success
+    probe_calls = [call for call in mock_run.call_args_list if call.args[0][0] == "ffprobe"]
+    assert len(probe_calls) == 2
+    assert {call.args[0][-1] for call in probe_calls} == {"clip1.mp4", "clip2.mp4"}
+
+
 @patch("subprocess.Popen")
 @patch("subprocess.run")
 def test_video_joiner_audio_probe_failure_stops_join(mock_run, mock_popen):

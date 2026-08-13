@@ -217,6 +217,46 @@ class KillDetector:
             "color": color_conf,
         }).as_dict()
 
+    def _analyze_candidate(
+        self,
+        frame: np.ndarray,
+        timestamp_ms: int,
+        yolo_conf: Optional[float] = None,
+        cached_color_pct: Optional[float] = None,
+    ) -> tuple:
+        """
+        Shared per-frame decision flow used by both process_frame and the batch runner.
+
+        Runs precise detection, applies the OCR-required gate, then evaluates rules
+        mode (confidence 1.0/0.0) or falls back to legacy weighted confidence vs
+        threshold. Returns (signals, confidence, event_or_None) where confidence is
+        the value to report (rules mode 1.0/0.0, OCR-gate 0.0, legacy weighted score)
+        and event is a detection event dict when the candidate is a kill, else None.
+        """
+        precise_kwargs = {"cached_color_pct": cached_color_pct}
+        if yolo_conf is not None:
+            precise_kwargs["yolo_conf"] = yolo_conf
+        signals = self._precise_detect(frame, **precise_kwargs)
+
+        # OCR Required logic (TASK-026)
+        if self.detection_view.ocr.required and signals.get('ocr', 0.0) == 0:
+            return signals, 0.0, None
+
+        # Rules mode OR legacy weighted scoring
+        rules_result = self._evaluate_rules(frame, signals, cached_color_pct, yolo_conf=yolo_conf)
+
+        if rules_result is not None:
+            # Rules mode: confidence is 1.0 or 0.0
+            if rules_result:
+                return signals, 1.0, self._build_detection_event(timestamp_ms, 1.0, signals)
+            return signals, 0.0, None
+
+        # Legacy mode: weighted scoring vs threshold
+        final_conf = self._calculate_confidence(signals)
+        if final_conf >= self.conf_threshold:
+            return signals, final_conf, self._build_detection_event(timestamp_ms, final_conf, signals)
+        return signals, final_conf, None
+
     def process_frame(self, frame: np.ndarray) -> Dict:
         """
         Analyzes a single frame and returns detection results. (TASK-024, TASK-026, TASK-027)
@@ -233,28 +273,13 @@ class KillDetector:
         if not passed:
             return results
 
-        # Step 2: Precise detection (Heavy)
-        signals = self._precise_detect(frame, cached_color_pct=cached_color_pct)
+        # Step 2+: Shared candidate analysis (precise detect -> OCR-required ->
+        # rules/legacy decision -> event build)
+        signals, confidence, event = self._analyze_candidate(frame, 0, cached_color_pct=cached_color_pct)
         results["signals"] = signals
-
-        # Step 3: OCR Required logic (TASK-026)
-        if self.detection_view.ocr.required and signals.get('ocr', 0.0) == 0:
-            results["is_kill"] = False
-            results["confidence"] = 0.0
-            return results
-
-        # Step 4: Rules mode OR legacy weighted scoring
-        rules_result = self._evaluate_rules(frame, signals, cached_color_pct)
-        
-        if rules_result is not None:
-            # Rules mode: is_kill from rules, confidence is 1.0 or 0.0
-            results["is_kill"] = rules_result
-            results["confidence"] = 1.0 if rules_result else 0.0
-        else:
-            # Legacy mode: weighted scoring
-            final_conf = self._calculate_confidence(signals)
-            results["confidence"] = final_conf
-            results["is_kill"] = final_conf >= self.conf_threshold
+        results["confidence"] = confidence
+        if event is not None:
+            results["is_kill"] = True
 
         return results
 

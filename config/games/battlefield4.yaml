@@ -1,7 +1,9 @@
 config_version: 1
 game_name: battlefield4
 global:
-  output_dir: G:/Video/Battlefield 4/my_highlights
+  # Set your own absolute output directory, e.g. "G:/Video/Battlefield 4/my_highlights".
+  # Relative paths are resolved from the working directory at runtime.
+  output_dir: "output"
 detection:
   killfeed_roi:
   - 0.42423664122137406

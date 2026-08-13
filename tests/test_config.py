@@ -233,6 +233,23 @@ class TestConfigLoader(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             self.loader.load_config(game_name="non_existent_game")
 
+    def test_game_configs_output_dir_is_relative(self):
+        """Committed game configs must not contain machine-specific absolute output dirs."""
+        for game_name in ("battlefield4", "battlefield6"):
+            config = self.loader.load_config(game_name=game_name)
+            output_dir = config["global"]["output_dir"]
+            self.assertFalse(
+                os.path.isabs(output_dir),
+                f"{game_name} output_dir must be relative, got: {output_dir}",
+            )
+
+    def test_default_config_has_no_dangling_template_paths(self):
+        """Default config must not reference template images that do not exist in the repo."""
+        config = self.loader.load_config()
+        templates = config["detection"].get("templates", {})
+        for name in ("skull_icon", "kill_icon"):
+            self.assertNotIn(name, templates)
+
     def test_validation(self):
         """Test that basic OCR validation works."""
         # Valid config

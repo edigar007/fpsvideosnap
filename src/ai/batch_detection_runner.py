@@ -37,34 +37,23 @@ class BatchDetectionRunner:
 
             profiler.start("batch_precise_detect_per_frame")
             cached_color = color_cache.get(i, 0.0)
-            signals = self.detector._precise_detect(
+            _, _, event = self.detector._analyze_candidate(
                 frame,
+                timestamps_ms[i],
                 yolo_conf=max_yolo_conf,
                 cached_color_pct=cached_color,
             )
             profiler.end("batch_precise_detect_per_frame")
 
+            # OCR-required gate and rules/legacy decision now live in
+            # KillDetector._analyze_candidate; the profiler sub-steps are kept
+            # as-is for backwards-compatible timing stats.
             profiler.start("batch_ocr_required_check")
-            if self.detector.detection_view.ocr.required and signals.get("ocr", 0.0) == 0:
-                profiler.end("batch_ocr_required_check")
-                continue
             profiler.end("batch_ocr_required_check")
 
             profiler.start("batch_calculate_confidence")
-            rules_result = self.detector._evaluate_rules(
-                frame,
-                signals,
-                cached_color,
-                yolo_conf=max_yolo_conf,
-            )
-
-            if rules_result is not None:
-                if rules_result:
-                    events.append(self.detector._build_detection_event(timestamps_ms[i], 1.0, signals))
-            else:
-                final_conf = self.detector._calculate_confidence(signals)
-                if final_conf >= self.detector.conf_threshold:
-                    events.append(self.detector._build_detection_event(timestamps_ms[i], final_conf, signals))
+            if event is not None:
+                events.append(event)
             profiler.end("batch_calculate_confidence")
 
         return events

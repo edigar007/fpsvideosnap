@@ -159,7 +159,7 @@ class DetectionRuleView:
     def from_dict(cls, rule: Mapping[str, Any]) -> "DetectionRuleView":
         return cls(
             name=str(rule.get("name", "")),
-            enabled=bool(rule.get("enabled", True)),
+            enabled=_as_bool(rule.get("enabled"), True),
             require=tuple(str(signal) for signal in rule.get("require", []) or []),
             detection_overrides=dict(rule.get("detection_overrides", {}) or {}),
         )

@@ -76,14 +76,8 @@ detection:
     lang: "ch" # 'ch' for Chinese, 'en' for English
     use_gpu: true
 
-  # Template matching settings
-  templates:
-    skull_icon:
-      path: "skull.png"
-      threshold: 0.7
-    kill_icon:
-      path: "kill.png"
-      threshold: 0.7
+  # Template matching is configured per game in config/games/*.yaml
+  # (detection.templates.<name>.path); the default config ships no templates.
 
   # Multi-signal weights
   weights:

@@ -115,3 +115,19 @@ def test_detection_config_view_invalid_bool_strings_use_defaults():
     assert view.ocr.required is False
     assert view.ocr.use_gpu is True
     assert view.prefilter.enabled is True
+
+
+def test_detection_rule_view_string_false_and_zero_parse_as_disabled():
+    view = DetectionConfigView.from_config(
+        {
+            "rules": [
+                {"name": "str_false", "enabled": "false", "require": ["ocr"]},
+                {"name": "str_zero", "enabled": "0", "require": ["ocr"]},
+                {"name": "missing_enabled", "require": ["ocr"]},
+            ]
+        }
+    )
+
+    assert view.rules[0].enabled is False
+    assert view.rules[1].enabled is False
+    assert view.rules[2].enabled is True

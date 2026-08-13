@@ -122,28 +122,13 @@ class OpenCVMatcher:
             
         return search_gray, (offset_x, offset_y)
 
-    def match_template(self, frame: np.ndarray, template_name: str, threshold=0.8, roi=None, scales=None):
+    def _best_match(self, search_gray: np.ndarray, template_gray: np.ndarray, scales=None):
         """
-        Performs template matching on a frame or ROI.
-        Supports multi-scale matching if scales list is provided.
-        Returns (location, confidence_score) tuple.
+        Run multi-scale template matching against a grayscale search area.
+        Returns (best_loc, best_val): the best template location and its score.
+        best_loc is None and best_val is -1 when no scale could be matched
+        (e.g. every resized template is larger than the search area).
         """
-        if template_name not in self.templates:
-            return None, 0
-
-        search_gray, (offset_x, offset_y) = self._get_search_area(frame, roi)
-        template_gray = self.templates_gray.get(template_name)
-        
-        if template_gray is None:
-            # Fallback if somehow missing from gray cache
-            template = self.templates[template_name]
-            if len(template.shape) == 3 and template.shape[2] == 4:
-                template_gray = cv2.cvtColor(template, cv2.COLOR_BGRA2GRAY)
-            elif len(template.shape) == 3:
-                template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-            else:
-                template_gray = template
-
         best_max_val = -1
         best_max_loc = None
 
@@ -170,6 +155,32 @@ class OpenCVMatcher:
                 best_max_val = max_val
                 best_max_loc = max_loc
 
+        return best_max_loc, best_max_val
+
+    def match_template(self, frame: np.ndarray, template_name: str, threshold=0.8, roi=None, scales=None):
+        """
+        Performs template matching on a frame or ROI.
+        Supports multi-scale matching if scales list is provided.
+        Returns (location, confidence_score) tuple.
+        """
+        if template_name not in self.templates:
+            return None, 0
+
+        search_gray, (offset_x, offset_y) = self._get_search_area(frame, roi)
+        template_gray = self.templates_gray.get(template_name)
+
+        if template_gray is None:
+            # Fallback if somehow missing from gray cache
+            template = self.templates[template_name]
+            if len(template.shape) == 3 and template.shape[2] == 4:
+                template_gray = cv2.cvtColor(template, cv2.COLOR_BGRA2GRAY)
+            elif len(template.shape) == 3:
+                template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+            else:
+                template_gray = template
+
+        best_max_loc, best_max_val = self._best_match(search_gray, template_gray, scales)
+
         if best_max_val >= threshold:
             return (best_max_loc[0] + offset_x, best_max_loc[1] + offset_y), best_max_val
         
@@ -185,9 +196,6 @@ class OpenCVMatcher:
         
         best_result = {'name': None, 'location': None, 'score': 0.0}
 
-        if scales is None:
-            scales = [1.0]
-
         for name in template_names:
             if name not in self.templates:
                 continue
@@ -196,28 +204,7 @@ class OpenCVMatcher:
             if template_gray is None:
                 continue
 
-            current_best_score = -1
-            current_best_loc = None
-
-            for scale in scales:
-                if scale == 1.0:
-                    resized = template_gray
-                else:
-                    w = int(template_gray.shape[1] * scale)
-                    h = int(template_gray.shape[0] * scale)
-                    if w <= 0 or h <= 0:
-                        continue
-                    resized = cv2.resize(template_gray, (w, h))
-
-                if resized.shape[0] > search_gray.shape[0] or resized.shape[1] > search_gray.shape[1]:
-                    continue
-
-                res = cv2.matchTemplate(search_gray, resized, cv2.TM_CCOEFF_NORMED)
-                _, max_val, _, max_loc = cv2.minMaxLoc(res)
-
-                if max_val > current_best_score:
-                    current_best_score = max_val
-                    current_best_loc = max_loc
+            current_best_loc, current_best_score = self._best_match(search_gray, template_gray, scales)
 
             if current_best_score > best_result['score']:
                 best_result['score'] = current_best_score
@@ -242,33 +229,9 @@ class OpenCVMatcher:
         search_gray, (offset_x, offset_y) = self._get_search_area(frame, roi)
         matches = {}
 
-        if scales is None:
-            scales = [1.0]
-
         for name in self.templates.keys():
             template_gray = self.templates_gray[name]
-            best_score = -1
-            best_loc = None
-
-            for scale in scales:
-                if scale == 1.0:
-                    resized = template_gray
-                else:
-                    w = int(template_gray.shape[1] * scale)
-                    h = int(template_gray.shape[0] * scale)
-                    if w <= 0 or h <= 0:
-                        continue
-                    resized = cv2.resize(template_gray, (w, h))
-
-                if resized.shape[0] > search_gray.shape[0] or resized.shape[1] > search_gray.shape[1]:
-                    continue
-
-                res = cv2.matchTemplate(search_gray, resized, cv2.TM_CCOEFF_NORMED)
-                _, max_val, _, max_loc = cv2.minMaxLoc(res)
-
-                if max_val > best_score:
-                    best_score = max_val
-                    best_loc = max_loc
+            best_loc, best_score = self._best_match(search_gray, template_gray, scales)
 
             if best_score >= threshold:
                 loc = (best_loc[0] + offset_x, best_loc[1] + offset_y)

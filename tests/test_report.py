@@ -81,6 +81,94 @@ def test_report_empty_cases(temp_dirs):
         content = f.read()
         assert "No kills detected" in content
 
+
+def test_report_stats_from_metadata_stage_video_info(temp_dirs):
+    """Regression: VIDEO_INFO dict shaped exactly like _run_metadata_stage output
+    (legacy + new keys) must render populated stats instead of Unknown/0x0/0."""
+    output_dir, _ = temp_dirs
+    generator = ReportGenerator(output_dir)
+
+    video_info = {
+        "path": "input_video.mp4",
+        "duration": 330.0,
+        "resolution": "1920x1080",
+        "fps": 60.0,
+        "video_path": "input_video.mp4",
+        "width": 1920,
+        "height": 1080,
+        "duration_str": "00:05:30",
+    }
+
+    report_path = generator.generate(video_info, [], {}, [])
+    assert os.path.exists(report_path)
+    with open(report_path, "r", encoding="utf-8") as f:
+        content = f.read()
+        assert "**Source File**: input_video.mp4" in content
+        assert "**Resolution**: 1920x1080" in content
+        assert "**FPS**: 60" in content
+        assert "**Duration**: 00:05:30" in content
+        assert "Unknown" not in content
+
+
+def test_report_stats_new_keys_only(temp_dirs):
+    """Regression: VIDEO_INFO with only the new keys must render populated stats."""
+    output_dir, _ = temp_dirs
+    generator = ReportGenerator(output_dir)
+
+    video_info = {
+        "video_path": "clip_input.mp4",
+        "width": 1280,
+        "height": 720,
+        "fps": 30,
+        "duration_str": "00:02:15",
+    }
+
+    report_path = generator.generate(video_info, [], {}, [])
+    assert os.path.exists(report_path)
+    with open(report_path, "r", encoding="utf-8") as f:
+        content = f.read()
+        assert "**Source File**: clip_input.mp4" in content
+        assert "**Resolution**: 1280x720" in content
+        assert "**FPS**: 30" in content
+        assert "**Duration**: 00:02:15" in content
+
+
+def test_report_stats_legacy_keys_only(temp_dirs):
+    """Regression: VIDEO_INFO with only the legacy pipeline keys must fall back
+    to parsing the WxH resolution string and formatting the duration."""
+    output_dir, _ = temp_dirs
+    generator = ReportGenerator(output_dir)
+
+    video_info = {
+        "path": "legacy_input.mp4",
+        "duration": 125.0,
+        "resolution": "1920x1080",
+        "fps": 59.94,
+    }
+
+    report_path = generator.generate(video_info, [], {}, [])
+    assert os.path.exists(report_path)
+    with open(report_path, "r", encoding="utf-8") as f:
+        content = f.read()
+        assert "**Source File**: legacy_input.mp4" in content
+        assert "**Resolution**: 1920x1080" in content
+        assert "**FPS**: 59.94" in content
+        assert "**Duration**: 00:02:05" in content
+
+
+def test_format_duration():
+    """Test the seconds -> HH:MM:SS formatter."""
+    from src.report.report_generator import format_duration
+
+    assert format_duration(0) == "00:00:00"
+    assert format_duration(59) == "00:00:59"
+    assert format_duration(60) == "00:01:00"
+    assert format_duration(330.0) == "00:05:30"
+    assert format_duration(3661) == "01:01:01"
+    assert format_duration(None) == "00:00:00"
+    assert format_duration("nope") == "00:00:00"
+    assert format_duration(-5) == "00:00:00"
+
 def test_history_manager(temp_dirs):
     _, history_dir = temp_dirs
     config = {

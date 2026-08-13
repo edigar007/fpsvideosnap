@@ -4,8 +4,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Type
 
 from src.audio.audio_mixer import AudioMixer
-from src.report.report_generator import ReportGenerator
+from src.report.report_generator import ReportGenerator, format_duration
 from src.utils.logger import get_logger
+from src.video.video_info import VideoInfo
 from src.video.video_joiner import VideoJoiner
 
 logger = get_logger(__name__)
@@ -61,37 +62,62 @@ def merge_clips_to_highlight(
     merged_no_audio = os.path.join(output_dir, f"combined_temp_{timestamp}.mp4")
     final_output = os.path.join(output_dir, f"combined_highlights_{timestamp}.mp4")
 
+    keep_intermediates = bool(config.get("global", {}).get("debug", False)) or bool(
+        config.get("video", {}).get("join_fix", {}).get("keep_intermediates", False)
+    )
+
+    def _remove_merged_no_audio() -> None:
+        """Remove the intermediate merged file unless keep_intermediates is set."""
+        if os.path.exists(merged_no_audio) and merged_no_audio != final_output and not keep_intermediates:
+            try:
+                os.remove(merged_no_audio)
+            except OSError as exc:
+                logger.warning(f"Failed to remove intermediate merged video {merged_no_audio}: {exc}")
+
     joiner = video_joiner_cls(config)
     if not joiner.join_clips(clip_paths, merged_no_audio):
         logger.error("[red]Failed to merge clips.[/red]")
         return None
 
     if _is_cancelled(cancel_event):
+        _remove_merged_no_audio()
         return _cancelled_merge_result("merge_audio", clips, source_videos)
 
     mixer = audio_mixer_cls(config)
     result_path = mixer.mix_audio(merged_no_audio, final_output)
 
     if _is_cancelled(cancel_event):
+        _remove_merged_no_audio()
         return _cancelled_merge_result("merge_report", clips, source_videos)
 
     if result_path == merged_no_audio:
         shutil.copy2(merged_no_audio, final_output)
 
-    keep_intermediates = bool(config.get("global", {}).get("debug", False)) or bool(
-        config.get("video", {}).get("join_fix", {}).get("keep_intermediates", False)
-    )
-    if os.path.exists(merged_no_audio) and merged_no_audio != final_output and not keep_intermediates:
-        try:
-            os.remove(merged_no_audio)
-        except OSError as exc:
-            logger.warning(f"Failed to remove intermediate merged video {merged_no_audio}: {exc}")
+    _remove_merged_no_audio()
 
     report_gen = report_generator_cls(output_dir)
     video_info = {
         "path": f"Combined from {len(source_videos)} videos",
         "source_videos": [os.path.basename(v) for v in source_videos],
     }
+    try:
+        merged_info = VideoInfo(
+            final_output,
+            ffprobe_path=config.get("video", {}).get("ffprobe_path", "ffprobe"),
+        )
+        video_info.update(
+            {
+                "video_path": final_output,
+                "width": merged_info.width,
+                "height": merged_info.height,
+                "fps": merged_info.fps,
+                "duration": merged_info.duration,
+                "duration_str": format_duration(merged_info.duration),
+                "source_videos": [os.path.basename(v) for v in source_videos],
+            }
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to probe merged video {final_output}: {exc}")
     report_path = report_gen.generate(video_info, clips, config)
 
     return {

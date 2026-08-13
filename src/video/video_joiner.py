@@ -61,6 +61,12 @@ class VideoJoiner:
             safe_channel_layout=self.safe_channel_layout,
         )
 
+        # Cache audio probe results per path so each clip is ffprobed at most
+        # once per VideoJoiner instance. Without this, join_clips probes every
+        # clip once in _any_clip_missing_audio and then again in
+        # _normalize_clip_for_join via _has_audio_stream (2 probes per clip).
+        self._audio_probe_cache: Dict[str, AudioProbeResult] = {}
+
     def join_clips(self, clip_paths: List[str], output_path: str) -> bool:
         """Merges clips into one video at output_path."""
         if not clip_paths:
@@ -134,6 +140,12 @@ class VideoJoiner:
         return probe_result == AudioProbeResult.HAS_AUDIO
 
     def _probe_audio_stream(self, input_path: str) -> AudioProbeResult:
+        # Reuse the cached result so repeated audio checks within the same join
+        # (e.g. _any_clip_missing_audio followed by _has_audio_stream inside
+        # _normalize_clip_for_join) do not spawn ffprobe twice per clip.
+        if input_path in self._audio_probe_cache:
+            return self._audio_probe_cache[input_path]
+
         cmd = [
             self.ffprobe_path,
             "-v",
@@ -151,9 +163,15 @@ class VideoJoiner:
             data = json.loads(result.stdout or "{}")
         except (OSError, subprocess.CalledProcessError, json.JSONDecodeError, TypeError) as exc:
             logger.error(f"Could not probe audio stream for {input_path}: {exc}")
-            return AudioProbeResult.PROBE_FAILED
+            probe_result = AudioProbeResult.PROBE_FAILED
+            self._audio_probe_cache[input_path] = probe_result
+            return probe_result
 
-        return AudioProbeResult.HAS_AUDIO if data.get("streams") else AudioProbeResult.NO_AUDIO
+        probe_result = (
+            AudioProbeResult.HAS_AUDIO if data.get("streams") else AudioProbeResult.NO_AUDIO
+        )
+        self._audio_probe_cache[input_path] = probe_result
+        return probe_result
 
     def _normalize_clip_for_join(self, input_path: str, temp_dir: str, index: int) -> str:
         output_path = os.path.join(temp_dir, f"join_norm_{index + 1:03d}.mp4")
