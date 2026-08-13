@@ -178,44 +178,27 @@ class KillDetector:
     ) -> Dict:
         """
         Runs heavy detection signals (OCR, Template, YOLO). (TASK-023)
-        
+
+        复用 DetectionSignalExtractor.compute 的统一信号计算管线，消除与
+        rule_engine 路径的重复实现（原先手动调用四个子 extractor）。
+
         Args:
             cached_color_pct: 如果提供，则使用缓存的颜色检测结果，避免重复计算
         """
-        detection_cfg = self.detection_view
-
-        # 1. OCR Signal
-        profiler.start('precise_ocr_detection')
-        ocr_conf = self.signal_extractor.ocr.compute(frame, self.ocr, detection_cfg, self.roi)
-        profiler.end('precise_ocr_detection')
-
-        # 2. Template Signal
-        profiler.start('precise_template_matching')
-        template_conf = self.signal_extractor.template.compute(frame, self.cv, detection_cfg, self.roi)
-        profiler.end('precise_template_matching')
-
-        # 3. YOLO Signal
-        profiler.start('precise_yolo_detection')
-        max_yolo_conf = self.signal_extractor.yolo.compute(frame, self.yolo, yolo_conf=yolo_conf)
-        profiler.end('precise_yolo_detection')
-
-        # 4. Color Signal (使用缓存结果或重新计算)
-        profiler.start('precise_color_signal')
-        color_conf = self.signal_extractor.color.compute(
-            frame,
-            self.cv,
-            detection_cfg,
-            self.roi,
-            cached_color_pct=cached_color_pct,
-        )
-        profiler.end('precise_color_signal')
-
-        return SignalResult.from_dict({
-            "ocr": ocr_conf,
-            "template": template_conf,
-            "yolo": max_yolo_conf,
-            "color": color_conf,
-        }).as_dict()
+        profiler.start('precise_detection')
+        try:
+            return self.signal_extractor.compute(
+                frame,
+                self.yolo,
+                self.cv,
+                self.ocr,
+                self.detection_view,
+                self.roi,
+                cached_color_pct=cached_color_pct,
+                yolo_conf=yolo_conf,
+            )
+        finally:
+            profiler.end('precise_detection')
 
     def _analyze_candidate(
         self,

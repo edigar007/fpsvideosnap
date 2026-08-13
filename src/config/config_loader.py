@@ -47,36 +47,6 @@ class ConfigLoader:
         """Validates critical configuration fields."""
         validate_config(config)
 
-    def _validate_roi(self, roi: Any, field_name: str):
-        if (
-            not isinstance(roi, list)
-            or len(roi) != 4
-            or not all(isinstance(value, (int, float)) for value in roi)
-        ):
-            raise ValueError(f"{field_name} must be a list of 4 numbers")
-
-        _x, _y, width, height = roi
-        if not all(0.0 <= value <= 1.0 for value in roi):
-            raise ValueError(f"{field_name} values must be between 0.0 and 1.0")
-        if width <= 0 or height <= 0:
-            raise ValueError(f"{field_name} width and height must be greater than 0")
-
-    def _validate_hsv(self, hsv: Any, field_name: str):
-        if (
-            not isinstance(hsv, list)
-            or len(hsv) != 3
-            or not all(isinstance(value, (int, float)) for value in hsv)
-        ):
-            raise ValueError(f"{field_name} must be a list of 3 numbers")
-
-        hue, saturation, value = hsv
-        if not 0 <= hue <= 180:
-            raise ValueError(f"{field_name}[0] hue must be between 0 and 180")
-        if not 0 <= saturation <= 255:
-            raise ValueError(f"{field_name}[1] saturation must be between 0 and 255")
-        if not 0 <= value <= 255:
-            raise ValueError(f"{field_name}[2] value must be between 0 and 255")
-
     def _load_yaml(self, path: str) -> Dict[str, Any]:
         with open(path, 'r', encoding='utf-8') as f:
             return yaml.safe_load(f) or {}

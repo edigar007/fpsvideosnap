@@ -38,6 +38,9 @@ Thumbs.db
 
 # Model and data
 models/
+# NOTE: config-referenced template PNGs (e.g. models/templates/battlefield6/111111.png,
+# models/templates/battlefield_1/killicon.png) are force-tracked so fresh clones
+# keep template matching working. Other files under models/ stay ignored.
 *.pt
 *.pth
 *.h5

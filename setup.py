@@ -22,8 +22,7 @@ setup(
         "paddlepaddle-gpu",
         "paddleocr",
         "easyocr",
-        "python-Levenshtein",
-        "fuzzywuzzy",
+        "rapidfuzz",
     ],
     entry_points={
         "console_scripts": [
