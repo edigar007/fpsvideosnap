@@ -45,8 +45,7 @@ class BatchDetectionRunner:
             profiler.end("batch_precise_detect_per_frame")
 
             profiler.start("batch_ocr_required_check")
-            ocr_cfg = self.detector.config.get("detection", {}).get("ocr", {})
-            if ocr_cfg.get("required", False) and signals.get("ocr", 0.0) == 0:
+            if self.detector.detection_view.ocr.required and signals.get("ocr", 0.0) == 0:
                 profiler.end("batch_ocr_required_check")
                 continue
             profiler.end("batch_ocr_required_check")

@@ -10,12 +10,10 @@ torchaudio==2.6.0+cu124
 ffmpeg-python>=0.2.0
 tqdm>=4.67.1
 rich>=14.2.0
-pytest>=9.0.2
 psutil>=7.2.1
 flask>=3.0.0
 Pillow>=10.0.0
 paddlepaddle-gpu>=2.6.0
 paddleocr==3.3.2
 easyocr>=1.7.0
-python-Levenshtein>=0.21.0
-fuzzywuzzy>=0.18.0
+rapidfuzz>=3.0.0

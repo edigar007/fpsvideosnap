@@ -121,7 +121,7 @@ class CheckpointStore:
         }
         try:
             with open(temp_path, "w", encoding="utf-8") as f:
-                json.dump(checkpoint_data, f, indent=4)
+                json.dump(checkpoint_data, f, indent=4, default=str)
                 f.flush()
                 os.fsync(f.fileno())
             if os.path.exists(checkpoint_path):

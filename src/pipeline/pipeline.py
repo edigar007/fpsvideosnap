@@ -152,6 +152,7 @@ class Pipeline:
                 f"--- Stage {name.upper()} finished: "
                 f"[{color}]{status.value}[/{color}] ({stage.duration:.2f}s) ---"
             )
+            # Only save checkpoint when a stage finishes, not while RUNNING.
             self._save_checkpoint()
 
     def _save_checkpoint(self):

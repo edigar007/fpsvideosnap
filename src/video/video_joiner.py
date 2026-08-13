@@ -331,12 +331,14 @@ class VideoJoiner:
             stdout, stderr = process.communicate()
 
             if process.returncode != 0:
-                logger.error(f"FFmpeg failed with return code {process.returncode}")
+                logger.error(f"FFmpeg xfade failed with return code {process.returncode}")
                 logger.debug(f"FFmpeg stderr: {stderr.decode()}")
-                return False
+                logger.warning("Falling back to concat join without transitions")
+                return self._join_with_concat(clip_paths, output_path)
 
-            logger.info("Successfully joined clips.")
+            logger.info("Successfully joined clips with xfade.")
             return True
         except Exception as e:
-            logger.error(f"Error joining clips: {e}")
-            return False
+            logger.error(f"Error joining clips with xfade: {e}")
+            logger.warning("Falling back to concat join without transitions")
+            return self._join_with_concat(clip_paths, output_path)

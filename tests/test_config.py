@@ -60,7 +60,7 @@ class TestConfigLoader(unittest.TestCase):
         })
         self.assertEqual(detection["prefilter"], {
             "enabled": True,
-            "color_threshold": 0.01,
+            "color_threshold": 0.005,
         })
         self.assertEqual(detection["killfeed_roi"], [
             0.4293561490006595,

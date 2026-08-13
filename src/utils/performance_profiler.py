@@ -1,6 +1,7 @@
 """
 Performance profiler for tracking and analyzing processing time of each step.
 """
+import threading
 import time
 from typing import Dict, Optional
 from collections import defaultdict
@@ -16,6 +17,7 @@ class PerformanceProfiler:
     """
     def __init__(self, enabled: bool = True):
         self.enabled = enabled
+        self._lock = threading.Lock()
         self.timings = defaultdict(list)  # {step_name: [duration1, duration2, ...]}
         self.current_steps = {}  # {step_name: start_time}
         self.counters = defaultdict(int)  # {step_name: count}
@@ -24,21 +26,23 @@ class PerformanceProfiler:
         """开始计时某个步骤"""
         if not self.enabled:
             return
-        self.current_steps[step_name] = time.time()
+        with self._lock:
+            self.current_steps[step_name] = time.time()
     
     def end(self, step_name: str):
         """结束计时某个步骤"""
         if not self.enabled:
             return
         
-        if step_name not in self.current_steps:
-            logger.warning(f"Performance profiler: step '{step_name}' not started")
-            return
-        
-        duration = time.time() - self.current_steps[step_name]
-        self.timings[step_name].append(duration)
-        self.counters[step_name] += 1
-        del self.current_steps[step_name]
+        with self._lock:
+            if step_name not in self.current_steps:
+                logger.warning(f"Performance profiler: step '{step_name}' not started")
+                return
+            
+            duration = time.time() - self.current_steps[step_name]
+            self.timings[step_name].append(duration)
+            self.counters[step_name] += 1
+            del self.current_steps[step_name]
         return duration
     
     def record(self, step_name: str, duration: float):
@@ -124,9 +128,10 @@ class PerformanceProfiler:
     
     def reset(self):
         """重置所有统计信息"""
-        self.timings.clear()
-        self.current_steps.clear()
-        self.counters.clear()
+        with self._lock:
+            self.timings.clear()
+            self.current_steps.clear()
+            self.counters.clear()
 
 
 # 全局性能分析器实例

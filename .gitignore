@@ -48,3 +48,4 @@ models/
 
 # Local planning artifacts
 .sisyphus/
+.pi/

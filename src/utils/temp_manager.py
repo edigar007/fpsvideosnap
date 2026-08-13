@@ -1,5 +1,6 @@
 import os
 import shutil
+import threading
 import uuid
 from typing import List
 from src.utils.logger import logger
@@ -9,6 +10,7 @@ class TempManager:
     
     def __init__(self, base_temp_dir: str = "temp"):
         self.base_temp_dir = os.path.abspath(base_temp_dir)
+        self._lock = threading.Lock()
         self.tracked_paths: List[str] = []
         
         if not os.path.exists(self.base_temp_dir):
@@ -22,7 +24,8 @@ class TempManager:
         temp_path = os.path.join(self.base_temp_dir, dir_name)
         
         os.makedirs(temp_path, exist_ok=True)
-        self.tracked_paths.append(temp_path)
+        with self._lock:
+            self.tracked_paths.append(temp_path)
         logger.debug(f"Created temp directory: {temp_path}")
         return temp_path
 
@@ -33,14 +36,18 @@ class TempManager:
             base = os.path.join(base, subdir)
             if not os.path.exists(base):
                 os.makedirs(base, exist_ok=True)
-                if base not in self.tracked_paths:
-                    self.tracked_paths.append(base)
+                with self._lock:
+                    if base not in self.tracked_paths:
+                        self.tracked_paths.append(base)
         
         return os.path.join(base, filename)
 
     def clean_all(self):
         """Removes all tracked temporary paths."""
-        for path in self.tracked_paths:
+        with self._lock:
+            paths = list(self.tracked_paths)
+            self.tracked_paths = []
+        for path in paths:
             if os.path.exists(path):
                 try:
                     if os.path.isdir(path):
@@ -50,7 +57,6 @@ class TempManager:
                     logger.debug(f"Cleaned up temp path: {path}")
                 except Exception as e:
                     logger.error(f"Failed to clean up {path}: {e}")
-        self.tracked_paths = []
 
 # Global instance for easy access
 temp_manager = TempManager()

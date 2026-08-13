@@ -95,20 +95,27 @@ class FrameExtractor:
             logger.error(f"FFmpeg bulk extraction failed: {proc.stderr[-2000:]}")
             raise RuntimeError("FFmpeg bulk extraction failed")
 
-        showinfo_re = re.compile(r"showinfo.*? n:\s*(\d+).*? pts_time:\s*([0-9\.]+)")
+        # Try multiple regex patterns for ffmpeg showinfo compatibility
+        showinfo_patterns = [
+            re.compile(r"showinfo.*? n:\s*(\d+).*? pts_time:\s*([0-9\.]+)"),
+            re.compile(r"\[showinfo\].*?n:\s*(\d+).*?pts_time:\s*([0-9\.]+)"),
+            re.compile(r"n:\s*(\d+).*?pts_time:\s*([0-9\.]+)"),
+        ]
         mapping = []
         offset_ms = int(start_ms) if start_ms is not None else 0
         for line in (proc.stderr or "").splitlines():
-            m = showinfo_re.search(line)
-            if not m:
-                continue
-            n = int(m.group(1))
-            pts_time = float(m.group(2))
-            ts_ms = offset_ms + int(round(pts_time * 1000.0))
-            mapping.append({"n": n, "pts_time": pts_time, "timestamp_ms": ts_ms})
+            for pat in showinfo_patterns:
+                m = pat.search(line)
+                if m:
+                    n = int(m.group(1))
+                    pts_time = float(m.group(2))
+                    ts_ms = offset_ms + int(round(pts_time * 1000.0))
+                    mapping.append({"n": n, "pts_time": pts_time, "timestamp_ms": ts_ms})
+                    break
 
         if not mapping:
-            raise RuntimeError("No showinfo mapping parsed; cannot map timestamps")
+            logger.warning("No showinfo mapping parsed from bulk extraction; falling back to precise mode")
+            raise RuntimeError("Bulk showinfo mapping failed")
 
         # Rename tmp_%06d.jpg -> frame_{timestamp_ms}.jpg
         final_files: List[str] = []
@@ -213,7 +220,11 @@ class FrameExtractor:
             f"Extracting {total_frames} frames from {os.path.basename(video_path)} "
             f"with interval {interval_ms}ms..."
         )
-        logger.info("Using precise timestamp extraction (may take longer but ensures accuracy)")
+        logger.warning(
+            "Using precise timestamp extraction. This is ~10-100x slower than bulk mode "
+            f"because it spawns {total_frames} separate ffmpeg processes. "
+            "Consider fixing bulk mode or reducing frame interval."
+        )
         
         final_files = []
         timestamp_ms = 0

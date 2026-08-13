@@ -37,8 +37,8 @@ class AudioMixer:
             data = json.loads(result.stdout or "{}")
             return bool(data.get("streams"))
         except Exception as exc:
-            logger.debug(f"Could not probe audio stream for {input_path}, assuming audio exists: {exc}")
-            return True
+            logger.warning(f"Could not probe audio stream for {input_path}, assuming no audio: {exc}")
+            return False
 
     def mix_audio(self, video_path: str, output_path: str = None) -> str:
         """

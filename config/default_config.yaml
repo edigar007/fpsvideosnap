@@ -96,7 +96,7 @@ detection:
   prefilter:
     color_threshold: 0.01 # Percentage of pixels matching color to trigger deep detection
 
-# Highilght generation settings
+# Highlight generation settings
 highlights:
   pre_kill_time: 3.0 # Seconds before kill
   post_kill_time: 1.0 # Seconds after kill

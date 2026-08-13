@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Type
@@ -29,8 +30,12 @@ class DetectionStageResult:
 
 def _parse_frame_timestamp_ms(frame_path: str) -> int:
     try:
-        ts_str = os.path.basename(frame_path).split("_")[1].split(".")[0]
-        return int(ts_str)
+        basename = os.path.basename(frame_path)
+        m = re.search(r"frame_(\d+)", basename)
+        if m:
+            return int(m.group(1))
+        logger.warning(f"Failed to parse timestamp from frame name: {frame_path}")
+        return 0
     except (IndexError, ValueError):
         logger.warning(f"Failed to parse timestamp from frame name: {frame_path}")
         return 0

@@ -19,6 +19,8 @@ def get_hsv_bounds(color_cfg: Dict[str, Any]) -> Tuple[Optional[List[float]], Op
 
     tolerance = color_cfg.get("tolerance", 0)
     if isinstance(tolerance, (int, float)):
+        # Saturation and Value ranges are wider (0-255) than Hue (0-179),
+        # so we double their tolerance to maintain proportional sensitivity.
         tolerance = [tolerance, tolerance * 2, tolerance * 2]
 
     if not isinstance(tolerance, (list, tuple)) or len(tolerance) != 3:

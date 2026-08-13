@@ -96,7 +96,7 @@ class ColorSignalExtractor:
             return True, None
 
         if not colors:
-            return True, 1.0
+            return True, None
 
         max_color_pct = 0.0
         for color_cfg in colors.values():

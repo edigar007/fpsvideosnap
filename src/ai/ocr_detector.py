@@ -58,17 +58,20 @@ if sys.platform == 'win32':
         print(f"[GPU] Warning: Failed to add CUDA paths: {e}")
 
 try:
-    from fuzzywuzzy import fuzz
+    from rapidfuzz import fuzz
 except ImportError:
-    # Fallback to a simple ratio if fuzzywuzzy is not available
-    def fuzz_ratio(s1, s2):
-        from difflib import SequenceMatcher
-        return SequenceMatcher(None, s1, s2).ratio()
-    class Fuzz:
-        @staticmethod
-        def ratio(s1, s2):
-            return int(fuzz_ratio(s1, s2) * 100)
-    fuzz = Fuzz()
+    try:
+        from fuzzywuzzy import fuzz
+    except ImportError:
+        # Fallback to a simple ratio if neither fuzzy library is available
+        def fuzz_ratio(s1, s2):
+            from difflib import SequenceMatcher
+            return SequenceMatcher(None, s1, s2).ratio()
+        class Fuzz:
+            @staticmethod
+            def ratio(s1, s2):
+                return int(fuzz_ratio(s1, s2) * 100)
+        fuzz = Fuzz()
 
 from src.utils.logger import get_logger
 
@@ -245,12 +248,6 @@ class OCRDetector:
                 _release_paddle_subprocess_worker()
             except Exception as exc:
                 logger.debug(f"Failed to release PaddleOCR subprocess worker: {exc}")
-
-    def __del__(self):
-        try:
-            self.close()
-        except Exception as exc:
-            logger.debug(f"Failed to close OCRDetector during cleanup: {exc}")
 
     def detect_text(self, image: np.ndarray, roi: Optional[List[int]] = None) -> List[Dict]:
         """
